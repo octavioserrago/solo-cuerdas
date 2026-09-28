@@ -1,0 +1,143 @@
+erDiagram
+    PERFILES ||--o{ VERIFICACIONES : solicita
+    PERFILES ||--o{ SUSCRIPCIONES : contrata
+    PLANES ||--o{ SUSCRIPCIONES : define
+    PERFILES ||--o{ PUBLICACIONES : publica
+    CATEGORIAS ||--o{ PUBLICACIONES : clasifica
+    MARCAS |o--o{ PUBLICACIONES : fabrica
+    PUBLICACIONES ||--o{ MEDIOS : contiene
+    PUBLICACIONES ||--o{ CONVERSACIONES : origina
+    PERFILES ||--o{ CONVERSACIONES : inicia
+    CONVERSACIONES ||--o{ MENSAJES : contiene
+    PERFILES ||--o{ MENSAJES : envia
+    PUBLICACIONES ||--o{ OPERACIONES : concreta
+    PERFILES ||--o{ OPERACIONES : compra
+    OPERACIONES ||--o{ CALIFICACIONES : habilita
+    PERFILES ||--o{ CALIFICACIONES : recibe
+    PERFILES ||--o{ DENUNCIAS : realiza
+    PUBLICACIONES |o--o{ DENUNCIAS : "es denunciada"
+
+    PERFILES {
+        uuid id PK "= auth.users.id (Supabase)"
+        text nombre
+        text apellido
+        text alias
+        text telefono
+        text provincia
+        text localidad
+        enum rol "usuario | moderador | admin"
+        enum estado_verificacion "sin_verificar | pendiente | verificado | rechazado"
+        numeric reputacion_promedio "calculado"
+        int cantidad_calificaciones "calculado"
+        timestamptz creado_en
+    }
+    VERIFICACIONES {
+        uuid id PK
+        uuid perfil_id FK
+        enum metodo "manual | proveedor_externo"
+        text proveedor "nullable: nombre del proveedor"
+        text referencia_externa "nullable: id en el proveedor"
+        text url_documento_frente "nullable, storage privado"
+        text url_documento_dorso "nullable, storage privado"
+        text url_selfie "nullable, storage privado"
+        enum estado "pendiente | aprobada | rechazada"
+        uuid revisado_por FK "nullable: moderador"
+        text motivo_rechazo
+        timestamptz creado_en
+        timestamptz revisado_en
+    }
+    PLANES {
+        int id PK
+        text nombre "Gratis | Plus | Tienda"
+        int max_publicaciones_activas
+        numeric precio_mensual
+        int destacados_incluidos
+    }
+    SUSCRIPCIONES {
+        uuid id PK
+        uuid perfil_id FK
+        int plan_id FK
+        enum estado "vigente | vencida | cancelada"
+        timestamptz fecha_inicio
+        timestamptz fecha_fin
+    }
+    CATEGORIAS {
+        int id PK
+        text nombre "guitarra electrica, violin, bajo..."
+    }
+    MARCAS {
+        int id PK
+        text nombre
+    }
+    PUBLICACIONES {
+        uuid id PK
+        uuid vendedor_id FK
+        int categoria_id FK
+        int marca_id FK "nullable: luthier o sin marca"
+        text modelo
+        text titulo
+        text descripcion
+        int anio
+        text origen
+        text numero_serie
+        enum estado_conservacion "nuevo | excelente | muy_bueno | bueno | para_reparar"
+        numeric precio
+        enum moneda "ARS | USD"
+        text provincia
+        text localidad
+        enum estado "borrador | activa | pausada | vendida | eliminada"
+        timestamptz destacada_hasta
+        timestamptz creado_en
+    }
+    MEDIOS {
+        uuid id PK
+        uuid publicacion_id FK
+        enum tipo "foto | audio | video"
+        text url
+        int orden
+        text hash_perceptual "deteccion de duplicados"
+        bool es_foto_verificacion "cartel con alias y fecha"
+    }
+    CONVERSACIONES {
+        uuid id PK
+        uuid publicacion_id FK
+        uuid comprador_id FK
+        timestamptz creado_en
+    }
+    MENSAJES {
+        uuid id PK
+        uuid conversacion_id FK
+        uuid emisor_id FK
+        text contenido
+        bool leido
+        timestamptz enviado_en
+    }
+    OPERACIONES {
+        uuid id PK
+        uuid publicacion_id FK
+        uuid comprador_id FK
+        numeric precio_final
+        enum moneda "ARS | USD"
+        enum estado "pendiente_confirmacion | concretada | cancelada"
+        timestamptz creado_en
+        timestamptz concretada_en
+    }
+    CALIFICACIONES {
+        uuid id PK
+        uuid operacion_id FK
+        uuid calificador_id FK
+        uuid calificado_id FK
+        int puntaje "1 a 5"
+        text comentario
+        timestamptz creado_en
+    }
+    DENUNCIAS {
+        uuid id PK
+        uuid denunciante_id FK
+        uuid publicacion_id FK "nullable"
+        uuid perfil_denunciado_id FK "nullable"
+        text motivo
+        enum estado "abierta | resuelta | descartada"
+        uuid resuelta_por FK
+        timestamptz creado_en
+    }
