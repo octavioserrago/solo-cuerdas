@@ -48,7 +48,7 @@ public class Profile {
     @Column(name = "created_at")
     private Instant createdAt;
 
-    protected Profile() {
+    public Profile() {
         // JPA
     }
 

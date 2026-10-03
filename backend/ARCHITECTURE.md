@@ -98,12 +98,19 @@ ar.solocuerdas.backend
 │   ├── SaleResponse.java           — record de respuesta
 │   ├── CreateSaleRequest.java      — record de request de POST
 │   └── ConfirmSaleRequest.java     — record de request de POST /{id}/confirm
-└── reviews/
-    ├── ReviewController.java      — POST /
-    ├── Review.java                 — entidad JPA de `reviews` (rating: Short, es smallint)
-    ├── ReviewRepository.java       — JpaRepository<Review, UUID>
-    ├── ReviewResponse.java         — record de respuesta
-    └── CreateReviewRequest.java    — record de request de POST
+├── reviews/
+│   ├── ReviewController.java      — POST /
+│   ├── Review.java                 — entidad JPA de `reviews` (rating: Short, es smallint)
+│   ├── ReviewRepository.java       — JpaRepository<Review, UUID>
+│   ├── ReviewResponse.java         — record de respuesta
+│   └── CreateReviewRequest.java    — record de request de POST
+└── reports/
+    ├── ReportController.java       — POST /, PATCH /{id} (resolver)
+    ├── Report.java                  — entidad JPA de `reports`
+    ├── ReportRepository.java        — JpaRepository<Report, UUID>
+    ├── ReportResponse.java          — record de respuesta
+    ├── CreateReportRequest.java     — record de request de POST
+    └── ResolveReportRequest.java    — record de request de PATCH /{id}
 ```
 
 Paquete base: `ar.solocuerdas.backend`. Un paquete por dominio de negocio
@@ -158,6 +165,8 @@ Flujo de una request autenticada:
 | POST | `/api/sales` | JWT requerido, dueño de la publicación | Crea una venta `pending_confirmation` para un comprador puntual. Genera un código de 6 dígitos que el vendedor le pasa al comprador en persona. Publicación no `active` → `400`; ya hay venta pendiente/completada para esa publicación → `409`. |
 | POST | `/api/sales/{id}/confirm` | JWT requerido, debe ser el comprador | El comprador escribe el código. Si coincide: la venta pasa a `completed` (y se borra el código), y la publicación pasa a `status = sold`. Código incorrecto → `400`; venta ya no está `pending_confirmation` → `400`; no sos el comprador → `403`. |
 | POST | `/api/reviews` | JWT requerido, parte de la venta | Califica a la otra parte de una venta `completed` (`saleId`, `rating`, `comment` opcional). El `revieweeId` lo calcula el backend: si sos el comprador, calificás al vendedor (vía `listings.seller_id`), y viceversa. Venta no `completed` → `400`; no participaste de esa venta → `403`; ya la calificaste → `409`. La reputación (`profiles.rating_average`/`rating_count`) se actualiza sola, vía el trigger de la base — no hay lógica de backend para eso. |
+| POST | `/api/reports` | JWT requerido | Denuncia una publicación y/o un perfil (`listingId`/`reportedProfileId`, al menos uno; `reason`). Siempre arranca en `open`. Ningún objetivo indicado → `400`. |
+| PATCH | `/api/reports/{id}` | JWT requerido, **moderador o admin** | Resuelve una denuncia (`status`: `resolved`/`dismissed`), registrando quién la resolvió. No sos moderador/admin → `403` (primera vez que el backend chequea **rol**, no solo dueño del recurso). Denuncia ya no `open` → `400`; valor de `status` inválido → `400`. |
 
 Todos los campos de `listings` se consideraron públicos a propósito (incluido
 `serial_number`, decisión explícita) — por eso `ListingResponse` es un único
@@ -300,21 +309,31 @@ todavía — un solo `application.yml` para todo.
   `listings.seller_id`); venta no completada → `400`, no participaste →
   `403`, ya calificaste esa venta → `409`. La reputación se recalcula
   sola (trigger de la base).
-- Entidades JPA: `Profile`, `Listing`, `Sale`, `Review`, `Plan`/`Subscription`
-  (estas dos últimas mínimas, de solo lectura — ver sección 6).
+- `reports`: `POST /api/reports` (denunciar una publicación y/o un
+  perfil) y `PATCH /api/reports/{id}` (resolver — **moderador/admin**,
+  `403` si no; primera autorización por **rol**, no por dueño del
+  recurso, del proyecto).
+- **MVP core completo**: `listings → sales → reviews → reports`, el
+  orden que se había definido en `docs/ARCHITECTURE.md` sección 5. A
+  partir de acá, lo que sigue son sub-proyectos que quedaron afuera a
+  propósito (ver pendientes) o módulos nuevos (conversaciones/mensajes,
+  verificación de identidad).
+- Entidades JPA: `Profile`, `Listing`, `Sale`, `Review`, `Report`,
+  `Plan`/`Subscription` (estas dos últimas mínimas, de solo lectura —
+  ver sección 6).
 - `ApiExceptionHandler` (`@RestControllerAdvice`): `DataIntegrityViolationException`
   → `409`, `NoSuchElementException` → `404`, `ListingQuotaExceededException`
-  → `409`. `AccessDeniedException` (dueño/parte de una venta) y status/código
-  inválido (`ResponseStatusException`) se resuelven con el soporte nativo
-  de Spring, sin entrada propia acá.
+  → `409`. `AccessDeniedException` (dueño/parte de la venta/rol) y
+  status/código inválido (`ResponseStatusException`) se resuelven con el
+  soporte nativo de Spring, sin entrada propia acá.
 - Esquema completo migrado (13 tablas, enums, triggers, RLS, buckets) +
   una migración de evolución (`confirmation_code` en `sales`, fix de
   `recalculate_rating`).
 - Probado de punta a punta contra el servidor real (no solo tests
-  mockeados): `GET`/`PATCH /me`, todo `listings` y todo `sales`
-  confirmados por Postman contra Supabase de verdad. `reviews` todavía
-  solo probado con tests automatizados (Postman pendiente).
-- Tests: 33 (1 de contexto + 32 de controllers, con TDD — `@WebMvcTest` +
+  mockeados): `GET`/`PATCH /me`, todo `listings`, todo `sales` y todo
+  `reviews` confirmados por Postman contra Supabase de verdad. `reports`
+  todavía solo probado con tests automatizados (Postman pendiente).
+- Tests: 40 (1 de contexto + 39 de controllers, con TDD — `@WebMvcTest` +
   repositorios mockeados, sin pegarle a la base real).
 
 **Pendiente (próximos pasos típicos, no priorizados)**
@@ -327,11 +346,13 @@ todavía — un solo `application.yml` para todo.
   se ve el promedio/contador en el perfil); validación de formato en
   `CreateReviewRequest` (`rating` 1-5, `comment` ≤500 — hoy dependen de
   los `check` de la base, igual que pasó al principio con `listings`).
-- CRUD de conversaciones/mensajes/reports (sin entidad JPA todavía).
+- De `reports`: listar denuncias abiertas (hoy un moderador necesita el
+  `id` de otra fuente, ej. Supabase Table Editor, para poder resolverla).
+- Módulos nuevos: conversaciones/mensajes (con su particularidad de
+  Realtime+RLS), verificación de identidad (`identity_verifications`).
 - Atar `sales`/`reviews` a que ambas partes tengan `identity_status =
   verified` — refuerzo anti-colusión pensado para cuando exista el
-  módulo de verificación de identidad (CU0007/08).
-- Autorización por rol (`moderator`/`admin`) más allá de "dueño del recurso".
+  módulo de verificación de identidad.
 - Test de integración real contra Postgres (Testcontainers) — hoy todo se
   prueba con el repositorio mockeado.
 - `UpdateProfileRequest`/`UpdateListingRequest` no permiten vaciar un campo

@@ -126,3 +126,8 @@ perderlas de vista.
   `GET /api/users/me`. Si se retoma esta idea, diseñarla como una extensión
   propia del DER (punto 7 de la sección 2), no mezclada a mitad de camino
   del MVP core.
+  **Actualización (2026-10-03):** el MVP core ya está completo (`listings`,
+  `sales`, `reviews` y `reports` implementados y probados — ver
+  `backend/ARCHITECTURE.md` sección 9). La precondición para retomar esta
+  idea ya se cumplió; si se retoma, sigue siendo una extensión propia del
+  DER, como se definió arriba.
