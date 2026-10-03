@@ -104,13 +104,18 @@ ar.solocuerdas.backend
 │   ├── ReviewRepository.java       — JpaRepository<Review, UUID>
 │   ├── ReviewResponse.java         — record de respuesta
 │   └── CreateReviewRequest.java    — record de request de POST
-└── reports/
-    ├── ReportController.java       — POST /, PATCH /{id} (resolver)
-    ├── Report.java                  — entidad JPA de `reports`
-    ├── ReportRepository.java        — JpaRepository<Report, UUID>
-    ├── ReportResponse.java          — record de respuesta
-    ├── CreateReportRequest.java     — record de request de POST
-    └── ResolveReportRequest.java    — record de request de PATCH /{id}
+├── reports/
+│   ├── ReportController.java       — POST /, PATCH /{id} (resolver)
+│   ├── Report.java                  — entidad JPA de `reports`
+│   ├── ReportRepository.java        — JpaRepository<Report, UUID>
+│   ├── ReportResponse.java          — record de respuesta
+│   ├── CreateReportRequest.java     — record de request de POST
+│   └── ResolveReportRequest.java    — record de request de PATCH /{id}
+└── catalog/
+    ├── CatalogController.java      — GET /api/public/categories, GET /api/public/brands
+    ├── Category.java / Brand.java   — entidades JPA de solo lectura
+    ├── CategoryRepository.java / BrandRepository.java
+    └── CategoryResponse.java / BrandResponse.java
 ```
 
 Paquete base: `ar.solocuerdas.backend`. Un paquete por dominio de negocio
@@ -167,6 +172,8 @@ Flujo de una request autenticada:
 | POST | `/api/reviews` | JWT requerido, parte de la venta | Califica a la otra parte de una venta `completed` (`saleId`, `rating`, `comment` opcional). El `revieweeId` lo calcula el backend: si sos el comprador, calificás al vendedor (vía `listings.seller_id`), y viceversa. Venta no `completed` → `400`; no participaste de esa venta → `403`; ya la calificaste → `409`. La reputación (`profiles.rating_average`/`rating_count`) se actualiza sola, vía el trigger de la base — no hay lógica de backend para eso. |
 | POST | `/api/reports` | JWT requerido | Denuncia una publicación y/o un perfil (`listingId`/`reportedProfileId`, al menos uno; `reason`). Siempre arranca en `open`. Ningún objetivo indicado → `400`. |
 | PATCH | `/api/reports/{id}` | JWT requerido, **moderador o admin** | Resuelve una denuncia (`status`: `resolved`/`dismissed`), registrando quién la resolvió. No sos moderador/admin → `403` (primera vez que el backend chequea **rol**, no solo dueño del recurso). Denuncia ya no `open` → `400`; valor de `status` inválido → `400`. |
+| GET | `/api/public/categories` | **Sin auth** | Catálogo de categorías (seedeado, solo lectura). |
+| GET | `/api/public/brands` | **Sin auth** | Catálogo de marcas (seedeado, solo lectura). |
 
 Todos los campos de `listings` se consideraron públicos a propósito (incluido
 `serial_number`, decisión explícita) — por eso `ListingResponse` es un único
@@ -332,14 +339,19 @@ todavía — un solo `application.yml` para todo.
 - Probado de punta a punta contra el servidor real (no solo tests
   mockeados): `GET`/`PATCH /me`, todo `listings`, todo `sales` y todo
   `reviews` confirmados por Postman contra Supabase de verdad. `reports`
-  todavía solo probado con tests automatizados (Postman pendiente).
-- Tests: 40 (1 de contexto + 39 de controllers, con TDD — `@WebMvcTest` +
+  y `catalog` todavía solo probados con tests automatizados (Postman
+  pendiente).
+- `catalog`: `GET /api/public/categories` y `GET /api/public/brands` —
+  primer sub-proyecto de los que habían quedado afuera a propósito de
+  `listings` (ronda 1). Sin auth, sin lógica — catálogos seedeados de
+  solo lectura.
+- Tests: 42 (1 de contexto + 41 de controllers, con TDD — `@WebMvcTest` +
   repositorios mockeados, sin pegarle a la base real).
 
 **Pendiente (próximos pasos típicos, no priorizados)**
-- Sub-proyectos de `listings` que quedaron afuera a propósito: media
-  (fotos/audio/video vía URLs firmadas de Storage), búsqueda/filtrado,
-  endpoints de referencia para categorías/marcas.
+- Sub-proyectos de `listings` que quedan: media (fotos/audio/video vía
+  URLs firmadas de Storage), búsqueda/filtrado (ahora que `catalog` ya
+  da los ids de categoría/marca para filtrar).
 - De `sales`: cancelar una venta a mano, listar mis ventas (como
   comprador o vendedor).
 - De `reviews`: listar las reviews individuales de un usuario (hoy solo
