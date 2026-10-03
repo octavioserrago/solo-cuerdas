@@ -70,13 +70,27 @@ ar.solocuerdas.backend
 ├── config/
 │   ├── SecurityConfig.java       — filter chain de seguridad
 │   └── ApiExceptionHandler.java  — @RestControllerAdvice (errores → status HTTP)
-└── users/
-    ├── UserController.java          — GET /me, PATCH /me, GET /{id}
-    ├── Profile.java                  — entidad JPA de `profiles`
-    ├── ProfileRepository.java        — JpaRepository<Profile, UUID>
-    ├── ProfileResponse.java          — record de respuesta de /me (reemplaza al Map)
-    ├── PublicProfileResponse.java    — record de respuesta de /{id} (subconjunto público)
-    └── UpdateProfileRequest.java     — record de request de PATCH /me
+├── users/
+│   ├── UserController.java          — GET /me, PATCH /me, GET /{id}
+│   ├── Profile.java                  — entidad JPA de `profiles`
+│   ├── ProfileRepository.java        — JpaRepository<Profile, UUID>
+│   ├── ProfileResponse.java          — record de respuesta de /me (reemplaza al Map)
+│   ├── PublicProfileResponse.java    — record de respuesta de /{id} (subconjunto público)
+│   └── UpdateProfileRequest.java     — record de request de PATCH /me
+├── listings/
+│   ├── ListingController.java        — POST /, GET /me, PATCH /{id} (requieren JWT)
+│   ├── PublicListingController.java  — GET /, GET /{id} (sin auth, bajo /api/public/listings)
+│   ├── Listing.java                   — entidad JPA de `listings`
+│   ├── ListingRepository.java         — JpaRepository<Listing, UUID> + queries derivadas
+│   ├── ListingResponse.java           — record de respuesta (único, público = privado del dueño)
+│   ├── CreateListingRequest.java       — record de request de POST
+│   ├── UpdateListingRequest.java       — record de request de PATCH
+│   └── ListingQuotaExceededException.java — 409 cuando se llega al tope del plan
+└── plans/
+    ├── Plan.java                 — entidad JPA mínima de `plans` (solo id + max_active_listings)
+    ├── PlanRepository.java       — JpaRepository<Plan, Integer>
+    ├── Subscription.java         — entidad JPA mínima de `subscriptions`
+    └── SubscriptionRepository.java — JpaRepository<Subscription, UUID> + findByProfileIdAndStatus
 ```
 
 Paquete base: `ar.solocuerdas.backend`. Un paquete por dominio de negocio
@@ -123,6 +137,17 @@ Flujo de una request autenticada:
 | GET | `/api/users/me` | JWT requerido | Devuelve el `ProfileResponse` del usuario autenticado: datos de `profiles` + `email` (del JWT, no vive en la tabla). |
 | PATCH | `/api/users/me` | JWT requerido | Completa/edita el propio perfil. Actualización parcial: solo pisa los campos presentes en el body (`UpdateProfileRequest`). `username` inválido → `400`; `username` duplicado → `409` (vía `ApiExceptionHandler`). |
 | GET | `/api/users/{id}` | JWT requerido | Perfil público de **otro** usuario: `PublicProfileResponse` (subconjunto de campos — ver sección 7, nunca `phone`/`role`/`email`). `id` inexistente → `404`. |
+| POST | `/api/listings` | JWT requerido | Crea una publicación, siempre en `active`. `seller_id` sale del JWT. Si el vendedor llegó al cupo de su plan (`plans.max_active_listings`) → `409` con mensaje explicando las dos salidas (pausar una existente o mejorar de plan). |
+| GET | `/api/listings/me` | JWT requerido | Las publicaciones propias, en **cualquier** estado (necesario para poder elegir cuál pausar). |
+| PATCH | `/api/listings/{id}` | JWT requerido, dueño | Edita campos propios y/o cambia `status` entre `active`⇄`paused` (cualquier otro valor → `400`; no es dueño → `403`; reactivar en el tope del cupo → `409`, mismo chequeo que el `POST`). |
+| GET | `/api/public/listings/{id}` | **Sin auth** | Detalle público — solo si `status = 'active'` (el filtro va en la query, no en un `if` posterior); si no, `404` sin distinguir "no existe" de "no está activa". |
+| GET | `/api/public/listings` | **Sin auth** | Lista de publicaciones `active`. Sin filtros/paginación todavía (búsqueda queda para una próxima vuelta). |
+
+Todos los campos de `listings` se consideraron públicos a propósito (incluido
+`serial_number`, decisión explícita) — por eso `ListingResponse` es un único
+record, reutilizado tanto para las rutas públicas como para `/me`: la
+diferencia no está en qué campos se ven, sino en qué publicaciones se pueden
+ver (el público solo `active`; el dueño, cualquier estado).
 
 Los tres devuelven `record` de Java, no `Map` — la deuda que había acá ya se
 resolvió. `/{id}` requiere JWT igual que el resto (no está bajo
@@ -242,17 +267,35 @@ todavía — un solo `application.yml` para todo.
 - Esquema completo migrado (13 tablas, enums, triggers, RLS, buckets).
 - Probado de punta a punta contra el servidor real (no solo tests mockeados):
   `GET`/`PATCH /me` confirmados por Postman contra Supabase de verdad.
-- Tests: 7 (1 de contexto + 6 de `UserController`, con TDD — `@WebMvcTest` +
-  `ProfileRepository` mockeado, sin pegarle a la base real).
+- CRUD de `listings` (ronda 1 — core, sin media/búsqueda/categorías):
+  `POST`/`GET /me`/`PATCH /{id}` (autenticado) y `GET`/`GET /{id}`
+  (público, bajo `/api/public/listings`). Cupo por plan (`max_active_listings`)
+  chequeado al crear y al reactivar una pausada. Autorización por dueño
+  (`403` si no sos el vendedor) — primer endpoint que lo necesita.
+- Entidades JPA: `Profile`, `Listing`, `Plan`/`Subscription` (estas dos
+  mínimas, de solo lectura — ver sección 6).
+- `ApiExceptionHandler` (`@RestControllerAdvice`): `DataIntegrityViolationException`
+  → `409`, `NoSuchElementException` → `404`, `ListingQuotaExceededException`
+  → `409`. `AccessDeniedException` (dueño) y status inválido
+  (`ResponseStatusException`) se resuelven con el soporte nativo de Spring,
+  sin entrada propia acá.
+- Esquema completo migrado (13 tablas, enums, triggers, RLS, buckets).
+- Probado de punta a punta contra el servidor real (no solo tests mockeados):
+  `GET`/`PATCH /me` confirmados por Postman contra Supabase de verdad.
+  `listings` todavía solo probado con tests automatizados (Postman pendiente).
+- Tests: 20 (1 de contexto + 19 de controllers, con TDD — `@WebMvcTest` +
+  repositorios mockeados, sin pegarle a la base real).
 
 **Pendiente (próximos pasos típicos, no priorizados)**
-- CRUD de `listings`, conversaciones/mensajes, ventas, reviews, reports (sin
-  entidad JPA todavía).
-- Autorización por rol/dueño del recurso más allá de "JWT válido".
-- Reglas de negocio contextuales: cupo de publicaciones activas según plan,
-  quién puede calificar (requiere `sale` `completed`), etc.
-- Generación de URLs firmadas para subir a los buckets de Storage.
+- Sub-proyectos de `listings` que quedaron afuera a propósito: media
+  (fotos/audio/video vía URLs firmadas de Storage), búsqueda/filtrado,
+  endpoints de referencia para categorías/marcas.
+- CRUD de conversaciones/mensajes, ventas, reviews, reports (sin entidad
+  JPA todavía).
+- Autorización por rol (`moderator`/`admin`) más allá de "dueño del recurso".
 - Test de integración real contra Postgres (Testcontainers) — hoy todo se
   prueba con el repositorio mockeado.
-- `UpdateProfileRequest` no permite vaciar un campo a propósito (`null` y
-  "no enviado" se tratan igual).
+- `UpdateProfileRequest`/`UpdateListingRequest` no permiten vaciar un campo
+  a propósito (`null` y "no enviado" se tratan igual).
+- `status = 'deleted'` (baja definitiva) no está cubierto en `listings` —
+  solo `active`⇄`paused`.

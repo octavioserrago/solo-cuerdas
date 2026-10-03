@@ -8,6 +8,8 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
+import ar.solocuerdas.backend.listings.ListingQuotaExceededException;
+
 @RestControllerAdvice
 public class ApiExceptionHandler {
 
@@ -19,5 +21,10 @@ public class ApiExceptionHandler {
     @ExceptionHandler(NoSuchElementException.class)
     public ResponseEntity<Void> handleNotFound(NoSuchElementException ex) {
         return ResponseEntity.notFound().build();
+    }
+
+    @ExceptionHandler(ListingQuotaExceededException.class)
+    public ResponseEntity<String> handleQuotaExceeded(ListingQuotaExceededException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(ex.getMessage());
     }
 }
