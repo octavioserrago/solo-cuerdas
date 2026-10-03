@@ -166,7 +166,7 @@ Flujo de una request autenticada:
 | GET | `/api/listings/me` | JWT requerido | Las publicaciones propias, en **cualquier** estado (necesario para poder elegir cuál pausar). |
 | PATCH | `/api/listings/{id}` | JWT requerido, dueño | Edita campos propios y/o cambia `status` entre `active`⇄`paused` (cualquier otro valor → `400`; no es dueño → `403`; reactivar en el tope del cupo → `409`, mismo chequeo que el `POST`). |
 | GET | `/api/public/listings/{id}` | **Sin auth** | Detalle público — solo si `status = 'active'` (el filtro va en la query, no en un `if` posterior); si no, `404` sin distinguir "no existe" de "no está activa". |
-| GET | `/api/public/listings` | **Sin auth** | Lista de publicaciones `active`. Sin filtros/paginación todavía (búsqueda queda para una próxima vuelta). |
+| GET | `/api/public/listings` | **Sin auth** | Lista de publicaciones `active`, con filtros opcionales por query param: `categoryId`, `brandId`, `province`, `city`, `minPrice`, `maxPrice` (todos combinables, ninguno obligatorio). Sin paginación ni orden (destacadas primero, más nuevas primero) todavía. |
 | POST | `/api/sales` | JWT requerido, dueño de la publicación | Crea una venta `pending_confirmation` para un comprador puntual. Genera un código de 6 dígitos que el vendedor le pasa al comprador en persona. Publicación no `active` → `400`; ya hay venta pendiente/completada para esa publicación → `409`. |
 | POST | `/api/sales/{id}/confirm` | JWT requerido, debe ser el comprador | El comprador escribe el código. Si coincide: la venta pasa a `completed` (y se borra el código), y la publicación pasa a `status = sold`. Código incorrecto → `400`; venta ya no está `pending_confirmation` → `400`; no sos el comprador → `403`. |
 | POST | `/api/reviews` | JWT requerido, parte de la venta | Califica a la otra parte de una venta `completed` (`saleId`, `rating`, `comment` opcional). El `revieweeId` lo calcula el backend: si sos el comprador, calificás al vendedor (vía `listings.seller_id`), y viceversa. Venta no `completed` → `400`; no participaste de esa venta → `403`; ya la calificaste → `409`. La reputación (`profiles.rating_average`/`rating_count`) se actualiza sola, vía el trigger de la base — no hay lógica de backend para eso. |
@@ -338,20 +338,22 @@ todavía — un solo `application.yml` para todo.
   `recalculate_rating`).
 - Probado de punta a punta contra el servidor real (no solo tests
   mockeados): `GET`/`PATCH /me`, todo `listings`, todo `sales` y todo
-  `reviews` confirmados por Postman contra Supabase de verdad. `reports`
-  y `catalog` todavía solo probados con tests automatizados (Postman
-  pendiente).
+  `reviews` confirmados por Postman contra Supabase de verdad. `reports`,
+  `catalog` y la búsqueda filtrada todavía solo probados con tests
+  automatizados (Postman pendiente).
 - `catalog`: `GET /api/public/categories` y `GET /api/public/brands` —
-  primer sub-proyecto de los que habían quedado afuera a propósito de
-  `listings` (ronda 1). Sin auth, sin lógica — catálogos seedeados de
-  solo lectura.
-- Tests: 42 (1 de contexto + 41 de controllers, con TDD — `@WebMvcTest` +
+  sin auth, sin lógica, catálogos seedeados de solo lectura.
+- Búsqueda/filtrado de `listings`: `GET /api/public/listings` acepta
+  `categoryId`, `brandId`, `province`, `city`, `minPrice`, `maxPrice`
+  (todos opcionales y combinables), vía una sola query con parámetros
+  nulleables — sin Specifications ni Criteria API, mismo estilo que el
+  resto de los repositorios del proyecto.
+- Tests: 44 (1 de contexto + 43 de controllers, con TDD — `@WebMvcTest` +
   repositorios mockeados, sin pegarle a la base real).
 
 **Pendiente (próximos pasos típicos, no priorizados)**
-- Sub-proyectos de `listings` que quedan: media (fotos/audio/video vía
-  URLs firmadas de Storage), búsqueda/filtrado (ahora que `catalog` ya
-  da los ids de categoría/marca para filtrar).
+- De `listings`: media (fotos/audio/video vía URLs firmadas de Storage),
+  paginación y orden (destacadas/más nuevas primero) en la búsqueda.
 - De `sales`: cancelar una venta a mano, listar mis ventas (como
   comprador o vendedor).
 - De `reviews`: listar las reviews individuales de un usuario (hoy solo

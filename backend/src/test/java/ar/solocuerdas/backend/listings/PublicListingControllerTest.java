@@ -1,5 +1,7 @@
 package ar.solocuerdas.backend.listings;
 
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -73,7 +75,7 @@ class PublicListingControllerTest {
     }
 
     @Test
-    void listActiveListings() throws Exception {
+    void listActiveListingsWithoutFilters() throws Exception {
         Listing first = new Listing();
         first.setId(UUID.randomUUID());
         first.setTitle("Guitarra electrica Fender");
@@ -84,7 +86,8 @@ class PublicListingControllerTest {
         second.setTitle("Bajo acustico Yamaha");
         second.setStatus("active");
 
-        when(listingRepository.findByStatus("active")).thenReturn(List.of(first, second));
+        when(listingRepository.searchActive(isNull(), isNull(), isNull(), isNull(), isNull(), isNull()))
+                .thenReturn(List.of(first, second));
 
         mockMvc.perform(get("/api/public/listings"))
                 .andExpect(status().isOk())
@@ -95,10 +98,45 @@ class PublicListingControllerTest {
 
     @Test
     void listActiveListingsReturnsEmptyArrayWhenNone() throws Exception {
-        when(listingRepository.findByStatus("active")).thenReturn(List.of());
+        when(listingRepository.searchActive(isNull(), isNull(), isNull(), isNull(), isNull(), isNull()))
+                .thenReturn(List.of());
 
         mockMvc.perform(get("/api/public/listings"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.length()").value(0));
+    }
+
+    @Test
+    void listActiveListingsFilteredByCategory() throws Exception {
+        Listing violin = new Listing();
+        violin.setId(UUID.randomUUID());
+        violin.setTitle("Violin de estudio");
+        violin.setStatus("active");
+
+        when(listingRepository.searchActive(eq(6), isNull(), isNull(), isNull(), isNull(), isNull()))
+                .thenReturn(List.of(violin));
+
+        mockMvc.perform(get("/api/public/listings?categoryId=6"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].title").value("Violin de estudio"));
+    }
+
+    @Test
+    void listActiveListingsFilteredByPriceRange() throws Exception {
+        Listing affordable = new Listing();
+        affordable.setId(UUID.randomUUID());
+        affordable.setTitle("Ukelele economico");
+        affordable.setStatus("active");
+
+        when(listingRepository.searchActive(
+                isNull(), isNull(), isNull(), isNull(),
+                eq(new BigDecimal("10000")), eq(new BigDecimal("50000"))))
+                .thenReturn(List.of(affordable));
+
+        mockMvc.perform(get("/api/public/listings?minPrice=10000&maxPrice=50000"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].title").value("Ukelele economico"));
     }
 }

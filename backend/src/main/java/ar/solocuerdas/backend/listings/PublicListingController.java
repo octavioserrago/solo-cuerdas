@@ -1,5 +1,6 @@
 package ar.solocuerdas.backend.listings;
 
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -7,6 +8,7 @@ import java.util.stream.Collectors;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 // Endpoints navegables sin cuenta. Viven bajo /api/public/** (la unica zona
@@ -32,8 +34,14 @@ public class PublicListingController {
     }
 
     @GetMapping
-    public List<ListingResponse> list() {
-        return listingRepository.findByStatus("active").stream()
+    public List<ListingResponse> list(
+            @RequestParam(required = false) Integer categoryId,
+            @RequestParam(required = false) Integer brandId,
+            @RequestParam(required = false) String province,
+            @RequestParam(required = false) String city,
+            @RequestParam(required = false) BigDecimal minPrice,
+            @RequestParam(required = false) BigDecimal maxPrice) {
+        return listingRepository.searchActive(categoryId, brandId, province, city, minPrice, maxPrice).stream()
                 .map(ListingResponse::from)
                 .collect(Collectors.toList());
     }
