@@ -85,7 +85,7 @@ class ListingMediaControllerTest {
         ListingMedia media = pendingMedia(mediaId, listingId);
 
         when(listingRepository.findById(listingId)).thenReturn(Optional.of(listing));
-        when(listingMediaRepository.findById(mediaId)).thenReturn(Optional.of(media));
+        when(listingMediaRepository.findByIdAndListingId(mediaId, listingId)).thenReturn(Optional.of(media));
         when(listingMediaRepository.save(any(ListingMedia.class)))
                 .thenAnswer(invocation -> invocation.getArgument(0));
 
@@ -110,6 +110,40 @@ class ListingMediaControllerTest {
         mockMvc.perform(post("/api/listings/{listingId}/media/{mediaId}/confirm", listingId, mediaId)
                         .with(jwt().jwt(j -> j.subject(someoneElseId.toString()))))
                 .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void cannotConfirmMediaThatBelongsToAnotherListing() throws Exception {
+        // El dueno de "listingId" es real, pero el mediaId pertenece a OTRA
+        // publicacion (ajena) -- no tiene que poder confirmarla igual (IDOR).
+        UUID sellerId = UUID.randomUUID();
+        UUID listingId = UUID.randomUUID();
+        UUID mediaId = UUID.randomUUID();
+        Listing listing = ownedListing(listingId, sellerId);
+
+        when(listingRepository.findById(listingId)).thenReturn(Optional.of(listing));
+        when(listingMediaRepository.findByIdAndListingId(mediaId, listingId)).thenReturn(Optional.empty());
+
+        mockMvc.perform(post("/api/listings/{listingId}/media/{mediaId}/confirm", listingId, mediaId)
+                        .with(jwt().jwt(j -> j.subject(sellerId.toString()))))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void cannotConfirmMediaThatIsNotPending() throws Exception {
+        UUID sellerId = UUID.randomUUID();
+        UUID listingId = UUID.randomUUID();
+        UUID mediaId = UUID.randomUUID();
+        Listing listing = ownedListing(listingId, sellerId);
+        ListingMedia media = pendingMedia(mediaId, listingId);
+        media.setModerationStatus("approved");
+
+        when(listingRepository.findById(listingId)).thenReturn(Optional.of(listing));
+        when(listingMediaRepository.findByIdAndListingId(mediaId, listingId)).thenReturn(Optional.of(media));
+
+        mockMvc.perform(post("/api/listings/{listingId}/media/{mediaId}/confirm", listingId, mediaId)
+                        .with(jwt().jwt(j -> j.subject(sellerId.toString()))))
+                .andExpect(status().isBadRequest());
     }
 
     private Listing ownedListing(UUID id, UUID sellerId) {

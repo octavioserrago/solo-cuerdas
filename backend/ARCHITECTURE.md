@@ -181,7 +181,7 @@ Flujo de una request autenticada:
 | GET | `/api/public/categories` | **Sin auth** | Catálogo de categorías (seedeado, solo lectura). |
 | GET | `/api/public/brands` | **Sin auth** | Catálogo de marcas (seedeado, solo lectura). |
 | POST | `/api/listings/{listingId}/media` | JWT requerido, dueño | Reserva una subida: crea la fila en `listing_media` (`moderation_status = pending`) y devuelve una URL firmada de Supabase Storage para que el cliente suba el archivo directo (no pasa por el backend). |
-| POST | `/api/listings/{listingId}/media/{mediaId}/confirm` | JWT requerido, dueño | El cliente avisa que terminó de subir. Corre la revisión de moderación — **hoy un stub que siempre aprueba** (ver sección 7 y `docs/ARCHITECTURE.md` sección 5) — y pasa a `approved` (o `rejected` + borra el archivo de Storage, rama ya escrita aunque hoy nunca se dispare). |
+| POST | `/api/listings/{listingId}/media/{mediaId}/confirm` | JWT requerido, dueño | El cliente avisa que terminó de subir. Corre la revisión de moderación — **hoy un stub que siempre aprueba** (ver sección 7 y `docs/ARCHITECTURE.md` sección 5) — y pasa a `approved` (o `rejected` + borra el archivo de Storage, rama ya escrita aunque hoy nunca se dispare). `mediaId` que no pertenece a `listingId` → `404` (ver nota de seguridad abajo); ya no está `pending` → `400`. |
 
 Todos los campos de `listings` se consideraron públicos a propósito (incluido
 `serial_number`, decisión explícita) — por eso `ListingResponse` es un único
@@ -378,7 +378,14 @@ solo el backend la usa.
   — a propósito, es el diseño aceptado para la tesis; la regla real para
   producción (cuarentena antes del bucket público) está documentada como
   no negociable en `docs/ARCHITECTURE.md` secciones 2 y 5, no implementada.
-- Tests: 48 (1 de contexto + 47 de controllers, con TDD — `@WebMvcTest` +
+  **Fix de seguridad (detectado por revisión automática del commit, no en
+  el diseño original):** `confirm` buscaba la media solo por `mediaId`, sin
+  verificar que perteneciera al `listingId` del path — un dueño de
+  cualquier publicación podía confirmar (o, a futuro, disparar el borrado
+  de Storage de) media de una publicación ajena. Se corrigió escopeando la
+  búsqueda (`findByIdAndListingId`) y de paso se sumó el chequeo de que la
+  media siga `pending` antes de confirmarla (mismo patrón que `sales`).
+- Tests: 50 (1 de contexto + 49 de controllers, con TDD — `@WebMvcTest` +
   repositorios y `MediaStorageClient` mockeados; la implementación real de
   Storage no tiene test automatizado — mismo criterio que Postgres real,
   se verificó a mano contra la API de Supabase antes de escribir el código,

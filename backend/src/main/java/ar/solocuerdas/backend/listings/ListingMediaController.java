@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ResponseStatusException;
 
 @RestController
 @RequestMapping("/api/listings/{listingId}/media")
@@ -67,7 +68,11 @@ public class ListingMediaController {
         Listing listing = listingRepository.findById(listingId).orElseThrow();
         requireOwner(listing, requesterId);
 
-        ListingMedia media = listingMediaRepository.findById(mediaId).orElseThrow();
+        ListingMedia media = listingMediaRepository.findByIdAndListingId(mediaId, listingId).orElseThrow();
+
+        if (!"pending".equals(media.getModerationStatus())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Esta media ya no esta pendiente de confirmacion.");
+        }
 
         if (runModerationCheck(media)) {
             media.setModerationStatus("approved");
