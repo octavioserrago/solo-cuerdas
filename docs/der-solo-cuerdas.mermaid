@@ -1,143 +1,144 @@
 erDiagram
-    PERFILES ||--o{ VERIFICACIONES : solicita
-    PERFILES ||--o{ SUSCRIPCIONES : contrata
-    PLANES ||--o{ SUSCRIPCIONES : define
-    PERFILES ||--o{ PUBLICACIONES : publica
-    CATEGORIAS ||--o{ PUBLICACIONES : clasifica
-    MARCAS |o--o{ PUBLICACIONES : fabrica
-    PUBLICACIONES ||--o{ MEDIOS : contiene
-    PUBLICACIONES ||--o{ CONVERSACIONES : origina
-    PERFILES ||--o{ CONVERSACIONES : inicia
-    CONVERSACIONES ||--o{ MENSAJES : contiene
-    PERFILES ||--o{ MENSAJES : envia
-    PUBLICACIONES ||--o{ OPERACIONES : concreta
-    PERFILES ||--o{ OPERACIONES : compra
-    OPERACIONES ||--o{ CALIFICACIONES : habilita
-    PERFILES ||--o{ CALIFICACIONES : recibe
-    PERFILES ||--o{ DENUNCIAS : realiza
-    PUBLICACIONES |o--o{ DENUNCIAS : "es denunciada"
+    PROFILES ||--o{ IDENTITY_VERIFICATIONS : requests
+    PROFILES ||--o{ SUBSCRIPTIONS : subscribes
+    PLANS ||--o{ SUBSCRIPTIONS : defines
+    PROFILES ||--o{ LISTINGS : publishes
+    CATEGORIES ||--o{ LISTINGS : classifies
+    BRANDS |o--o{ LISTINGS : manufactures
+    LISTINGS ||--o{ LISTING_MEDIA : contains
+    LISTINGS ||--o{ CONVERSATIONS : originates
+    PROFILES ||--o{ CONVERSATIONS : starts
+    CONVERSATIONS ||--o{ MESSAGES : contains
+    PROFILES ||--o{ MESSAGES : sends
+    LISTINGS ||--o{ SALES : "is sold in"
+    PROFILES ||--o{ SALES : buys
+    SALES ||--o{ REVIEWS : enables
+    PROFILES ||--o{ REVIEWS : receives
+    PROFILES ||--o{ REPORTS : files
+    LISTINGS |o--o{ REPORTS : "is reported in"
 
-    PERFILES {
+    PROFILES {
         uuid id PK "= auth.users.id (Supabase)"
-        text nombre
-        text apellido
-        text alias
-        text telefono
-        text provincia
-        text localidad
-        enum rol "usuario | moderador | admin"
-        enum estado_verificacion "sin_verificar | pendiente | verificado | rechazado"
-        numeric reputacion_promedio "calculado"
-        int cantidad_calificaciones "calculado"
-        timestamptz creado_en
+        text first_name
+        text last_name
+        text username
+        text phone
+        text province
+        text city
+        enum role "user | moderator | admin"
+        enum identity_status "unverified | pending | verified | rejected"
+        numeric rating_average "calculated"
+        int rating_count "calculated"
+        timestamptz created_at
     }
-    VERIFICACIONES {
+    IDENTITY_VERIFICATIONS {
         uuid id PK
-        uuid perfil_id FK
-        enum metodo "manual | proveedor_externo"
-        text proveedor "nullable: nombre del proveedor"
-        text referencia_externa "nullable: id en el proveedor"
-        text url_documento_frente "nullable, storage privado"
-        text url_documento_dorso "nullable, storage privado"
-        text url_selfie "nullable, storage privado"
-        enum estado "pendiente | aprobada | rechazada"
-        uuid revisado_por FK "nullable: moderador"
-        text motivo_rechazo
-        timestamptz creado_en
-        timestamptz revisado_en
+        uuid profile_id FK
+        enum method "manual | external_provider"
+        text provider "nullable"
+        text external_reference "nullable: provider id"
+        text document_front_url "nullable, private storage"
+        text document_back_url "nullable, private storage"
+        text selfie_url "nullable, private storage"
+        enum status "pending | approved | rejected"
+        uuid reviewed_by FK "nullable: moderator"
+        text rejection_reason
+        timestamptz created_at
+        timestamptz reviewed_at
     }
-    PLANES {
+    PLANS {
         int id PK
-        text nombre "Gratis | Plus | Tienda"
-        int max_publicaciones_activas
-        numeric precio_mensual
-        int destacados_incluidos
+        text code "free | plus | store"
+        text name "Gratis | Plus | Tienda"
+        int max_active_listings
+        numeric monthly_price
+        int featured_included
     }
-    SUSCRIPCIONES {
+    SUBSCRIPTIONS {
         uuid id PK
-        uuid perfil_id FK
+        uuid profile_id FK
         int plan_id FK
-        enum estado "vigente | vencida | cancelada"
-        timestamptz fecha_inicio
-        timestamptz fecha_fin
+        enum status "active | expired | cancelled"
+        timestamptz starts_at
+        timestamptz ends_at
     }
-    CATEGORIAS {
+    CATEGORIES {
         int id PK
-        text nombre "guitarra electrica, violin, bajo..."
+        text name "Guitarra electrica, Violin..."
     }
-    MARCAS {
+    BRANDS {
         int id PK
-        text nombre
+        text name
     }
-    PUBLICACIONES {
+    LISTINGS {
         uuid id PK
-        uuid vendedor_id FK
-        int categoria_id FK
-        int marca_id FK "nullable: luthier o sin marca"
-        text modelo
-        text titulo
-        text descripcion
-        int anio
-        text origen
-        text numero_serie
-        enum estado_conservacion "nuevo | excelente | muy_bueno | bueno | para_reparar"
-        numeric precio
-        enum moneda "ARS | USD"
-        text provincia
-        text localidad
-        enum estado "borrador | activa | pausada | vendida | eliminada"
-        timestamptz destacada_hasta
-        timestamptz creado_en
+        uuid seller_id FK
+        int category_id FK
+        int brand_id FK "nullable: luthier or unbranded"
+        text model
+        text title
+        text description
+        int manufacture_year
+        text origin
+        text serial_number
+        enum item_condition "new | excellent | very_good | good | needs_repair"
+        numeric price
+        enum currency "ARS | USD"
+        text province
+        text city
+        enum status "draft | active | paused | sold | deleted"
+        timestamptz featured_until
+        timestamptz created_at
     }
-    MEDIOS {
+    LISTING_MEDIA {
         uuid id PK
-        uuid publicacion_id FK
-        enum tipo "foto | audio | video"
+        uuid listing_id FK
+        enum media_type "photo | audio | video"
         text url
-        int orden
-        text hash_perceptual "deteccion de duplicados"
-        bool es_foto_verificacion "cartel con alias y fecha"
+        int sort_order
+        text perceptual_hash "duplicate detection"
+        bool is_verification_photo "sign with username and date"
     }
-    CONVERSACIONES {
+    CONVERSATIONS {
         uuid id PK
-        uuid publicacion_id FK
-        uuid comprador_id FK
-        timestamptz creado_en
+        uuid listing_id FK
+        uuid buyer_id FK
+        timestamptz created_at
     }
-    MENSAJES {
+    MESSAGES {
         uuid id PK
-        uuid conversacion_id FK
-        uuid emisor_id FK
-        text contenido
-        bool leido
-        timestamptz enviado_en
+        uuid conversation_id FK
+        uuid sender_id FK
+        text content
+        bool is_read
+        timestamptz sent_at
     }
-    OPERACIONES {
+    SALES {
         uuid id PK
-        uuid publicacion_id FK
-        uuid comprador_id FK
-        numeric precio_final
-        enum moneda "ARS | USD"
-        enum estado "pendiente_confirmacion | concretada | cancelada"
-        timestamptz creado_en
-        timestamptz concretada_en
+        uuid listing_id FK
+        uuid buyer_id FK
+        numeric final_price
+        enum currency "ARS | USD"
+        enum status "pending_confirmation | completed | cancelled"
+        timestamptz created_at
+        timestamptz completed_at
     }
-    CALIFICACIONES {
+    REVIEWS {
         uuid id PK
-        uuid operacion_id FK
-        uuid calificador_id FK
-        uuid calificado_id FK
-        int puntaje "1 a 5"
-        text comentario
-        timestamptz creado_en
+        uuid sale_id FK
+        uuid reviewer_id FK
+        uuid reviewee_id FK
+        int rating "1 to 5"
+        text comment
+        timestamptz created_at
     }
-    DENUNCIAS {
+    REPORTS {
         uuid id PK
-        uuid denunciante_id FK
-        uuid publicacion_id FK "nullable"
-        uuid perfil_denunciado_id FK "nullable"
-        text motivo
-        enum estado "abierta | resuelta | descartada"
-        uuid resuelta_por FK
-        timestamptz creado_en
+        uuid reporter_id FK
+        uuid listing_id FK "nullable"
+        uuid reported_profile_id FK "nullable"
+        text reason
+        enum status "open | resolved | dismissed"
+        uuid resolved_by FK
+        timestamptz created_at
     }

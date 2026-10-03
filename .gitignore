@@ -1,3 +1,7 @@
 node_modules/
 .env
 .github/modernize/
+.DS_Store
+
+# Notas de contexto para Claude, por modulo (backend/claude.md, etc). No se versionan.
+**/claude.md
