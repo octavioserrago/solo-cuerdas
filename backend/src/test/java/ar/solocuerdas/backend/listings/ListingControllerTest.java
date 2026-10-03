@@ -49,6 +49,9 @@ class ListingControllerTest {
     private ListingRepository listingRepository;
 
     @MockitoBean
+    private ListingMediaRepository listingMediaRepository;
+
+    @MockitoBean
     private SubscriptionRepository subscriptionRepository;
 
     @MockitoBean
@@ -107,6 +110,41 @@ class ListingControllerTest {
                 .andExpect(jsonPath("$.length()").value(2))
                 .andExpect(jsonPath("$[0].status").value("active"))
                 .andExpect(jsonPath("$[1].status").value("paused"));
+    }
+
+    @Test
+    void ownListingsIncludeAllMediaRegardlessOfModerationStatus() throws Exception {
+        UUID sellerId = UUID.randomUUID();
+        UUID listingId = UUID.randomUUID();
+
+        Listing listing = new Listing();
+        listing.setId(listingId);
+        listing.setSellerId(sellerId);
+        listing.setStatus("active");
+
+        ListingMedia approved = new ListingMedia();
+        approved.setId(UUID.randomUUID());
+        approved.setListingId(listingId);
+        approved.setMediaType("photo");
+        approved.setUrl("https://storage.example/approved.jpg");
+        approved.setModerationStatus("approved");
+
+        ListingMedia pending = new ListingMedia();
+        pending.setId(UUID.randomUUID());
+        pending.setListingId(listingId);
+        pending.setMediaType("photo");
+        pending.setUrl("https://storage.example/pending.jpg");
+        pending.setModerationStatus("pending");
+
+        when(listingRepository.findBySellerId(sellerId)).thenReturn(List.of(listing));
+        when(listingMediaRepository.findByListingId(listingId)).thenReturn(List.of(approved, pending));
+
+        mockMvc.perform(get("/api/listings/me")
+                        .with(jwt().jwt(j -> j.subject(sellerId.toString()))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].media.length()").value(2))
+                .andExpect(jsonPath("$[0].media[0].moderationStatus").value("approved"))
+                .andExpect(jsonPath("$[0].media[1].moderationStatus").value("pending"));
     }
 
     private void stubPlanQuota(UUID sellerId, long activeListingCount, int maxActiveListings) {

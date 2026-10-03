@@ -35,6 +35,9 @@ class UpdateListingTest {
     private ListingRepository listingRepository;
 
     @MockitoBean
+    private ListingMediaRepository listingMediaRepository;
+
+    @MockitoBean
     private SubscriptionRepository subscriptionRepository;
 
     @MockitoBean

@@ -173,6 +173,14 @@ Flujo de una request autenticada:
 | PATCH | `/api/listings/{id}` | JWT requerido, dueño | Edita campos propios y/o cambia `status` entre `active`⇄`paused` (cualquier otro valor → `400`; no es dueño → `403`; reactivar en el tope del cupo → `409`, mismo chequeo que el `POST`). |
 | GET | `/api/public/listings/{id}` | **Sin auth** | Detalle público — solo si `status = 'active'` (el filtro va en la query, no en un `if` posterior); si no, `404` sin distinguir "no existe" de "no está activa". |
 | GET | `/api/public/listings` | **Sin auth** | Lista de publicaciones `active`, con filtros opcionales por query param: `categoryId`, `brandId`, `province`, `city`, `minPrice`, `maxPrice` (todos combinables, ninguno obligatorio). Sin paginación ni orden (destacadas primero, más nuevas primero) todavía. |
+
+Desde esta vuelta, `ListingResponse` incluye `media: MediaResponse[]`. El
+filtro de qué media se ve no está en el campo, sino en **quién pide**: las
+rutas públicas (`GET /api/public/listings`, `GET /api/public/listings/{id}`)
+solo traen media `approved` (la query ya la excluye, no un filtro posterior
+— mismo criterio que con el `status` de la publicación); las rutas del
+dueño (`POST`, `PATCH /{id}`, `GET /me`) traen **toda** su media, en
+cualquier estado, para que sepa qué sigue `pending`/`rejected`.
 | POST | `/api/sales` | JWT requerido, dueño de la publicación | Crea una venta `pending_confirmation` para un comprador puntual. Genera un código de 6 dígitos que el vendedor le pasa al comprador en persona. Publicación no `active` → `400`; ya hay venta pendiente/completada para esa publicación → `409`. |
 | POST | `/api/sales/{id}/confirm` | JWT requerido, debe ser el comprador | El comprador escribe el código. Si coincide: la venta pasa a `completed` (y se borra el código), y la publicación pasa a `status = sold`. Código incorrecto → `400`; venta ya no está `pending_confirmation` → `400`; no sos el comprador → `403`. |
 | POST | `/api/sales/{id}/cancel` | JWT requerido, comprador o vendedor | Cancela una venta `pending_confirmation` (borra el código). Ya no está pendiente → `400`; no sos parte de la venta → `403`. |
@@ -396,7 +404,9 @@ solo el backend la usa.
   (individuales, con comentario), `GET /api/reports` (denuncias `open`,
   **moderador/admin únicamente** — mismo chequeo de rol que resolver,
   extraído a un helper compartido `requireModerator`).
-- Tests: 58 (1 de contexto + 57 de controllers, con TDD — `@WebMvcTest` +
+- `ListingResponse` ya incluye `media` (ver sección 5) — la vista del dueño
+  trae toda, la pública solo `approved`.
+- Tests: 60 (1 de contexto + 59 de controllers, con TDD — `@WebMvcTest` +
   repositorios y `MediaStorageClient` mockeados; la implementación real de
   Storage no tiene test automatizado — mismo criterio que Postgres real,
   se verificó a mano contra la API de Supabase antes de escribir el código,
@@ -404,10 +414,8 @@ solo el backend la usa.
   explícita, priorizando velocidad, se probará junto con el frontend).
 
 **Pendiente (próximos pasos típicos, no priorizados)**
-- De `listings`: que `ListingResponse` devuelva la media aprobada de la
-  publicación (hoy existe el endpoint de subida pero ninguna respuesta la
-  expone todavía); paginación y orden (destacadas/más nuevas primero) en
-  la búsqueda; compresión de video como capa intermedia (ver
+- De `listings`: paginación y orden (destacadas/más nuevas primero) en la
+  búsqueda; compresión de video como capa intermedia (ver
   `docs/ARCHITECTURE.md` sección 5).
 - De `reviews`: validación de formato en `CreateReviewRequest` (`rating`
   1-5, `comment` ≤500 — hoy dependen de los `check` de la base, igual que

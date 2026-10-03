@@ -2,6 +2,7 @@ package ar.solocuerdas.backend.listings;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 public record ListingResponse(
@@ -22,9 +23,12 @@ public record ListingResponse(
         String city,
         String status,
         Instant featuredUntil,
-        Instant createdAt) {
+        Instant createdAt,
+        // El llamador decide que lista de media pasar: toda (vista del dueno)
+        // o solo la aprobada (vista publica) -- este record no filtra nada.
+        List<MediaResponse> media) {
 
-    static ListingResponse from(Listing listing) {
+    static ListingResponse from(Listing listing, List<MediaResponse> media) {
         return new ListingResponse(
                 listing.getId(),
                 listing.getSellerId(),
@@ -43,6 +47,7 @@ public record ListingResponse(
                 listing.getCity(),
                 listing.getStatus(),
                 listing.getFeaturedUntil(),
-                listing.getCreatedAt());
+                listing.getCreatedAt(),
+                media);
     }
 }

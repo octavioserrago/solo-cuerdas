@@ -1,7 +1,10 @@
 package ar.solocuerdas.backend.listings;
 
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -31,6 +34,9 @@ class PublicListingControllerTest {
 
     @MockitoBean
     private ListingRepository listingRepository;
+
+    @MockitoBean
+    private ListingMediaRepository listingMediaRepository;
 
     @Test
     void getActiveListingWithoutAuthentication() throws Exception {
@@ -138,5 +144,36 @@ class PublicListingControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.length()").value(1))
                 .andExpect(jsonPath("$[0].title").value("Ukelele economico"));
+    }
+
+    @Test
+    void publicDetailOnlyIncludesApprovedMedia() throws Exception {
+        UUID listingId = UUID.randomUUID();
+
+        Listing listing = new Listing();
+        listing.setId(listingId);
+        listing.setSellerId(UUID.randomUUID());
+        listing.setTitle("Guitarra electrica Fender");
+        listing.setStatus("active");
+
+        ListingMedia approved = new ListingMedia();
+        approved.setId(UUID.randomUUID());
+        approved.setListingId(listingId);
+        approved.setMediaType("photo");
+        approved.setUrl("https://storage.example/approved.jpg");
+        approved.setModerationStatus("approved");
+
+        when(listingRepository.findByIdAndStatus(listingId, "active")).thenReturn(Optional.of(listing));
+        when(listingMediaRepository.findByListingIdAndModerationStatus(listingId, "approved"))
+                .thenReturn(List.of(approved));
+
+        mockMvc.perform(get("/api/public/listings/{id}", listingId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.media.length()").value(1))
+                .andExpect(jsonPath("$.media[0].moderationStatus").value("approved"));
+
+        // Nunca se le pide al repositorio la media "pending"/"rejected" para
+        // esta ruta -- la query en si ya la excluye, no un filtro posterior.
+        verify(listingMediaRepository, never()).findByListingId(any());
     }
 }

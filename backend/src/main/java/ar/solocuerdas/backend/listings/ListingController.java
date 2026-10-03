@@ -29,14 +29,17 @@ import ar.solocuerdas.backend.plans.SubscriptionRepository;
 public class ListingController {
 
     private final ListingRepository listingRepository;
+    private final ListingMediaRepository listingMediaRepository;
     private final SubscriptionRepository subscriptionRepository;
     private final PlanRepository planRepository;
 
     public ListingController(
             ListingRepository listingRepository,
+            ListingMediaRepository listingMediaRepository,
             SubscriptionRepository subscriptionRepository,
             PlanRepository planRepository) {
         this.listingRepository = listingRepository;
+        this.listingMediaRepository = listingMediaRepository;
         this.subscriptionRepository = subscriptionRepository;
         this.planRepository = planRepository;
     }
@@ -66,15 +69,17 @@ public class ListingController {
         listing.setStatus("active");
         listing.setCreatedAt(Instant.now());
 
+        // Recien creada: no puede tener media todavia (se sube aparte,
+        // despues de que la publicacion ya existe).
         Listing saved = listingRepository.save(listing);
-        return ListingResponse.from(saved);
+        return ListingResponse.from(saved, List.of());
     }
 
     @GetMapping("/me")
     public List<ListingResponse> mine(@AuthenticationPrincipal Jwt jwt) {
         UUID sellerId = UUID.fromString(jwt.getSubject());
         return listingRepository.findBySellerId(sellerId).stream()
-                .map(ListingResponse::from)
+                .map(listing -> ListingResponse.from(listing, ownMediaOf(listing.getId())))
                 .collect(Collectors.toList());
     }
 
@@ -134,7 +139,13 @@ public class ListingController {
         }
 
         Listing saved = listingRepository.save(listing);
-        return ListingResponse.from(saved);
+        return ListingResponse.from(saved, ownMediaOf(saved.getId()));
+    }
+
+    private List<MediaResponse> ownMediaOf(UUID listingId) {
+        return listingMediaRepository.findByListingId(listingId).stream()
+                .map(MediaResponse::from)
+                .collect(Collectors.toList());
     }
 
     private void applyStatusChange(Listing listing, String requestedStatus) {

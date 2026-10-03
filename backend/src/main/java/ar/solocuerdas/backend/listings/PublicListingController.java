@@ -20,9 +20,11 @@ import org.springframework.web.bind.annotation.RestController;
 public class PublicListingController {
 
     private final ListingRepository listingRepository;
+    private final ListingMediaRepository listingMediaRepository;
 
-    public PublicListingController(ListingRepository listingRepository) {
+    public PublicListingController(ListingRepository listingRepository, ListingMediaRepository listingMediaRepository) {
         this.listingRepository = listingRepository;
+        this.listingMediaRepository = listingMediaRepository;
     }
 
     @GetMapping("/{id}")
@@ -30,7 +32,7 @@ public class PublicListingController {
         // El filtro por status va en la consulta, no en un if posterior: una
         // publicacion que no esta activa no se puede devolver ni por error.
         Listing listing = listingRepository.findByIdAndStatus(id, "active").orElseThrow();
-        return ListingResponse.from(listing);
+        return ListingResponse.from(listing, approvedMediaOf(listing.getId()));
     }
 
     @GetMapping
@@ -42,7 +44,13 @@ public class PublicListingController {
             @RequestParam(required = false) BigDecimal minPrice,
             @RequestParam(required = false) BigDecimal maxPrice) {
         return listingRepository.searchActive(categoryId, brandId, province, city, minPrice, maxPrice).stream()
-                .map(ListingResponse::from)
+                .map(listing -> ListingResponse.from(listing, approvedMediaOf(listing.getId())))
+                .collect(Collectors.toList());
+    }
+
+    private List<MediaResponse> approvedMediaOf(UUID listingId) {
+        return listingMediaRepository.findByListingIdAndModerationStatus(listingId, "approved").stream()
+                .map(MediaResponse::from)
                 .collect(Collectors.toList());
     }
 }
