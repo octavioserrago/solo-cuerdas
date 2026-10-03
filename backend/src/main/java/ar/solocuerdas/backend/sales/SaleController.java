@@ -2,12 +2,16 @@ package ar.solocuerdas.backend.sales;
 
 import java.security.SecureRandom;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -88,6 +92,46 @@ public class SaleController {
         listingRepository.save(listing);
 
         return SaleResponse.from(saved);
+    }
+
+    @PostMapping("/{id}/cancel")
+    public SaleResponse cancel(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id) {
+        UUID requesterId = UUID.fromString(jwt.getSubject());
+        Sale sale = saleRepository.findById(id).orElseThrow();
+        Listing listing = listingRepository.findById(sale.getListingId()).orElseThrow();
+
+        boolean isBuyer = sale.getBuyerId().equals(requesterId);
+        boolean isSeller = listing.getSellerId().equals(requesterId);
+        if (!isBuyer && !isSeller) {
+            throw new AccessDeniedException("No sos parte de esta venta.");
+        }
+        if (!"pending_confirmation".equals(sale.getStatus())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "La venta no esta pendiente de confirmacion.");
+        }
+
+        sale.setStatus("cancelled");
+        sale.setConfirmationCode(null);
+        Sale saved = saleRepository.save(sale);
+        return SaleResponse.from(saved);
+    }
+
+    @GetMapping("/me")
+    public List<SaleResponse> mine(@AuthenticationPrincipal Jwt jwt) {
+        UUID requesterId = UUID.fromString(jwt.getSubject());
+
+        List<Sale> asBuyer = saleRepository.findByBuyerId(requesterId);
+
+        List<UUID> myListingIds = listingRepository.findBySellerId(requesterId).stream()
+                .map(Listing::getId)
+                .collect(Collectors.toList());
+        List<Sale> asSeller = myListingIds.isEmpty()
+                ? List.of()
+                : saleRepository.findByListingIdIn(myListingIds);
+
+        List<Sale> all = new ArrayList<>(asBuyer);
+        all.addAll(asSeller);
+
+        return all.stream().map(SaleResponse::from).collect(Collectors.toList());
     }
 
     private static String generateConfirmationCode() {

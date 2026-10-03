@@ -31,7 +31,7 @@ public class Review {
     @Column(name = "created_at")
     private Instant createdAt;
 
-    protected Review() {
+    public Review() {
         // JPA
     }
 

@@ -12,7 +12,7 @@ public record ReviewResponse(
         String comment,
         Instant createdAt) {
 
-    static ReviewResponse from(Review review) {
+    public static ReviewResponse from(Review review) {
         return new ReviewResponse(
                 review.getId(),
                 review.getSaleId(),

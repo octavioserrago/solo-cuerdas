@@ -1,12 +1,15 @@
 package ar.solocuerdas.backend.reports;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -52,17 +55,20 @@ public class ReportController {
         return ReportResponse.from(saved);
     }
 
+    @GetMapping
+    public List<ReportResponse> listOpen(@AuthenticationPrincipal Jwt jwt) {
+        requireModerator(jwt);
+        return reportRepository.findByStatus("open").stream()
+                .map(ReportResponse::from)
+                .collect(Collectors.toList());
+    }
+
     @PatchMapping("/{id}")
     public ReportResponse resolve(
             @AuthenticationPrincipal Jwt jwt,
             @PathVariable UUID id,
             @RequestBody ResolveReportRequest request) {
-        UUID requesterId = UUID.fromString(jwt.getSubject());
-        Profile requester = profileRepository.findById(requesterId).orElseThrow();
-
-        if (!"moderator".equals(requester.getRole()) && !"admin".equals(requester.getRole())) {
-            throw new AccessDeniedException("Necesitas ser moderador para resolver una denuncia.");
-        }
+        requireModerator(jwt);
 
         Report report = reportRepository.findById(id).orElseThrow();
         if (!"open".equals(report.getStatus())) {
@@ -74,9 +80,17 @@ public class ReportController {
         }
 
         report.setStatus(request.status());
-        report.setResolvedBy(requesterId);
+        report.setResolvedBy(UUID.fromString(jwt.getSubject()));
 
         Report saved = reportRepository.save(report);
         return ReportResponse.from(saved);
+    }
+
+    private void requireModerator(Jwt jwt) {
+        UUID requesterId = UUID.fromString(jwt.getSubject());
+        Profile requester = profileRepository.findById(requesterId).orElseThrow();
+        if (!"moderator".equals(requester.getRole()) && !"admin".equals(requester.getRole())) {
+            throw new AccessDeniedException("Necesitas ser moderador para esta accion.");
+        }
     }
 }

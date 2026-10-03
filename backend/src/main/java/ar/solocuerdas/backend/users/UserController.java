@@ -1,6 +1,8 @@
 package ar.solocuerdas.backend.users;
 
+import java.util.List;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 import jakarta.validation.Valid;
 
@@ -13,14 +15,19 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import ar.solocuerdas.backend.reviews.ReviewRepository;
+import ar.solocuerdas.backend.reviews.ReviewResponse;
+
 @RestController
 @RequestMapping("/api/users")
 public class UserController {
 
     private final ProfileRepository profileRepository;
+    private final ReviewRepository reviewRepository;
 
-    public UserController(ProfileRepository profileRepository) {
+    public UserController(ProfileRepository profileRepository, ReviewRepository reviewRepository) {
         this.profileRepository = profileRepository;
+        this.reviewRepository = reviewRepository;
     }
 
     @GetMapping("/me")
@@ -62,5 +69,12 @@ public class UserController {
     public PublicProfileResponse getPublicProfile(@PathVariable UUID id) {
         Profile profile = profileRepository.findById(id).orElseThrow();
         return PublicProfileResponse.from(profile);
+    }
+
+    @GetMapping("/{id}/reviews")
+    public List<ReviewResponse> getReviews(@PathVariable UUID id) {
+        return reviewRepository.findByRevieweeId(id).stream()
+                .map(ReviewResponse::from)
+                .collect(Collectors.toList());
     }
 }

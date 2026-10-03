@@ -175,6 +175,10 @@ Flujo de una request autenticada:
 | GET | `/api/public/listings` | **Sin auth** | Lista de publicaciones `active`, con filtros opcionales por query param: `categoryId`, `brandId`, `province`, `city`, `minPrice`, `maxPrice` (todos combinables, ninguno obligatorio). Sin paginación ni orden (destacadas primero, más nuevas primero) todavía. |
 | POST | `/api/sales` | JWT requerido, dueño de la publicación | Crea una venta `pending_confirmation` para un comprador puntual. Genera un código de 6 dígitos que el vendedor le pasa al comprador en persona. Publicación no `active` → `400`; ya hay venta pendiente/completada para esa publicación → `409`. |
 | POST | `/api/sales/{id}/confirm` | JWT requerido, debe ser el comprador | El comprador escribe el código. Si coincide: la venta pasa a `completed` (y se borra el código), y la publicación pasa a `status = sold`. Código incorrecto → `400`; venta ya no está `pending_confirmation` → `400`; no sos el comprador → `403`. |
+| POST | `/api/sales/{id}/cancel` | JWT requerido, comprador o vendedor | Cancela una venta `pending_confirmation` (borra el código). Ya no está pendiente → `400`; no sos parte de la venta → `403`. |
+| GET | `/api/sales/me` | JWT requerido | Las ventas donde sos comprador **o** vendedor (el vendedor sale de `listings`, junta las dos consultas). |
+| GET | `/api/users/{id}/reviews` | JWT requerido | Las reviews que recibió ese usuario (individuales, con comentario — el perfil ya mostraba el promedio/contador agregado). |
+| GET | `/api/reports` | JWT requerido, **moderador o admin** | Lista las denuncias `open` (la cola de moderación). Mismo chequeo de rol que `PATCH /api/reports/{id}` — `403` si no sos moderador/admin. |
 | POST | `/api/reviews` | JWT requerido, parte de la venta | Califica a la otra parte de una venta `completed` (`saleId`, `rating`, `comment` opcional). El `revieweeId` lo calcula el backend: si sos el comprador, calificás al vendedor (vía `listings.seller_id`), y viceversa. Venta no `completed` → `400`; no participaste de esa venta → `403`; ya la calificaste → `409`. La reputación (`profiles.rating_average`/`rating_count`) se actualiza sola, vía el trigger de la base — no hay lógica de backend para eso. |
 | POST | `/api/reports` | JWT requerido | Denuncia una publicación y/o un perfil (`listingId`/`reportedProfileId`, al menos uno; `reason`). Siempre arranca en `open`. Ningún objetivo indicado → `400`. |
 | PATCH | `/api/reports/{id}` | JWT requerido, **moderador o admin** | Resuelve una denuncia (`status`: `resolved`/`dismissed`), registrando quién la resolvió. No sos moderador/admin → `403` (primera vez que el backend chequea **rol**, no solo dueño del recurso). Denuncia ya no `open` → `400`; valor de `status` inválido → `400`. |
@@ -385,11 +389,19 @@ solo el backend la usa.
   de Storage de) media de una publicación ajena. Se corrigió escopeando la
   búsqueda (`findByIdAndListingId`) y de paso se sumó el chequeo de que la
   media siga `pending` antes de confirmarla (mismo patrón que `sales`).
-- Tests: 50 (1 de contexto + 49 de controllers, con TDD — `@WebMvcTest` +
+- Sub-proyectos sueltos de `sales`/`reviews`/`reports`: `POST
+  /api/sales/{id}/cancel` (comprador o vendedor, solo si está
+  `pending_confirmation`), `GET /api/sales/me` (como comprador o
+  vendedor, uniendo las dos consultas), `GET /api/users/{id}/reviews`
+  (individuales, con comentario), `GET /api/reports` (denuncias `open`,
+  **moderador/admin únicamente** — mismo chequeo de rol que resolver,
+  extraído a un helper compartido `requireModerator`).
+- Tests: 58 (1 de contexto + 57 de controllers, con TDD — `@WebMvcTest` +
   repositorios y `MediaStorageClient` mockeados; la implementación real de
   Storage no tiene test automatizado — mismo criterio que Postgres real,
   se verificó a mano contra la API de Supabase antes de escribir el código,
-  y falta la verificación manual end-to-end por Postman).
+  y falta la verificación manual end-to-end por Postman — decisión
+  explícita, priorizando velocidad, se probará junto con el frontend).
 
 **Pendiente (próximos pasos típicos, no priorizados)**
 - De `listings`: que `ListingResponse` devuelva la media aprobada de la
@@ -397,14 +409,9 @@ solo el backend la usa.
   expone todavía); paginación y orden (destacadas/más nuevas primero) en
   la búsqueda; compresión de video como capa intermedia (ver
   `docs/ARCHITECTURE.md` sección 5).
-- De `sales`: cancelar una venta a mano, listar mis ventas (como
-  comprador o vendedor).
-- De `reviews`: listar las reviews individuales de un usuario (hoy solo
-  se ve el promedio/contador en el perfil); validación de formato en
-  `CreateReviewRequest` (`rating` 1-5, `comment` ≤500 — hoy dependen de
-  los `check` de la base, igual que pasó al principio con `listings`).
-- De `reports`: listar denuncias abiertas (hoy un moderador necesita el
-  `id` de otra fuente, ej. Supabase Table Editor, para poder resolverla).
+- De `reviews`: validación de formato en `CreateReviewRequest` (`rating`
+  1-5, `comment` ≤500 — hoy dependen de los `check` de la base, igual que
+  pasó al principio con `listings`).
 - Módulos nuevos: conversaciones/mensajes (con su particularidad de
   Realtime+RLS), verificación de identidad (`identity_verifications`).
 - Atar `sales`/`reviews` a que ambas partes tengan `identity_status =

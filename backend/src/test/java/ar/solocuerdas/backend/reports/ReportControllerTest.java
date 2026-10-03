@@ -3,11 +3,13 @@ package ar.solocuerdas.backend.reports;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -151,6 +153,34 @@ class ReportControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"status\": \"resolved\"}"))
                 .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void moderatorListsOpenReports() throws Exception {
+        UUID moderatorId = UUID.randomUUID();
+        Profile moderator = profileWithRole(moderatorId, "moderator");
+        Report report = openReport(UUID.randomUUID());
+
+        when(profileRepository.findById(moderatorId)).thenReturn(Optional.of(moderator));
+        when(reportRepository.findByStatus("open")).thenReturn(List.of(report));
+
+        mockMvc.perform(get("/api/reports")
+                        .with(jwt().jwt(j -> j.subject(moderatorId.toString()))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].status").value("open"));
+    }
+
+    @Test
+    void nonModeratorCannotListReports() throws Exception {
+        UUID userId = UUID.randomUUID();
+        Profile regularUser = profileWithRole(userId, "user");
+
+        when(profileRepository.findById(userId)).thenReturn(Optional.of(regularUser));
+
+        mockMvc.perform(get("/api/reports")
+                        .with(jwt().jwt(j -> j.subject(userId.toString()))))
+                .andExpect(status().isForbidden());
     }
 
     private Report openReport(UUID id) {

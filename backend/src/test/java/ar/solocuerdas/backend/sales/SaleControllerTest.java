@@ -3,11 +3,13 @@ package ar.solocuerdas.backend.sales;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import java.math.BigDecimal;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -190,6 +192,100 @@ class SaleControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"confirmationCode\": \"123456\"}"))
                 .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void buyerCanCancelAPendingSale() throws Exception {
+        UUID sellerId = UUID.randomUUID();
+        UUID buyerId = UUID.randomUUID();
+        UUID listingId = UUID.randomUUID();
+        UUID saleId = UUID.randomUUID();
+        Sale sale = pendingSale(saleId, listingId, buyerId, "123456");
+        Listing listing = activeListing(listingId, sellerId);
+
+        when(saleRepository.findById(saleId)).thenReturn(Optional.of(sale));
+        when(listingRepository.findById(listingId)).thenReturn(Optional.of(listing));
+        when(saleRepository.save(any(Sale.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        mockMvc.perform(post("/api/sales/{id}/cancel", saleId)
+                        .with(jwt().jwt(j -> j.subject(buyerId.toString()))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("cancelled"));
+    }
+
+    @Test
+    void sellerCanCancelAPendingSale() throws Exception {
+        UUID sellerId = UUID.randomUUID();
+        UUID buyerId = UUID.randomUUID();
+        UUID listingId = UUID.randomUUID();
+        UUID saleId = UUID.randomUUID();
+        Sale sale = pendingSale(saleId, listingId, buyerId, "123456");
+        Listing listing = activeListing(listingId, sellerId);
+
+        when(saleRepository.findById(saleId)).thenReturn(Optional.of(sale));
+        when(listingRepository.findById(listingId)).thenReturn(Optional.of(listing));
+        when(saleRepository.save(any(Sale.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        mockMvc.perform(post("/api/sales/{id}/cancel", saleId)
+                        .with(jwt().jwt(j -> j.subject(sellerId.toString()))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("cancelled"));
+    }
+
+    @Test
+    void nonPartyCannotCancelASale() throws Exception {
+        UUID sellerId = UUID.randomUUID();
+        UUID buyerId = UUID.randomUUID();
+        UUID someoneElseId = UUID.randomUUID();
+        UUID listingId = UUID.randomUUID();
+        UUID saleId = UUID.randomUUID();
+        Sale sale = pendingSale(saleId, listingId, buyerId, "123456");
+        Listing listing = activeListing(listingId, sellerId);
+
+        when(saleRepository.findById(saleId)).thenReturn(Optional.of(sale));
+        when(listingRepository.findById(listingId)).thenReturn(Optional.of(listing));
+
+        mockMvc.perform(post("/api/sales/{id}/cancel", saleId)
+                        .with(jwt().jwt(j -> j.subject(someoneElseId.toString()))))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void cannotCancelASaleThatIsNotPending() throws Exception {
+        UUID sellerId = UUID.randomUUID();
+        UUID buyerId = UUID.randomUUID();
+        UUID listingId = UUID.randomUUID();
+        UUID saleId = UUID.randomUUID();
+        Sale sale = pendingSale(saleId, listingId, buyerId, null);
+        sale.setStatus("completed");
+        Listing listing = activeListing(listingId, sellerId);
+
+        when(saleRepository.findById(saleId)).thenReturn(Optional.of(sale));
+        when(listingRepository.findById(listingId)).thenReturn(Optional.of(listing));
+
+        mockMvc.perform(post("/api/sales/{id}/cancel", saleId)
+                        .with(jwt().jwt(j -> j.subject(buyerId.toString()))))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void listsMySalesAsBuyerAndSeller() throws Exception {
+        UUID userId = UUID.randomUUID();
+        UUID otherListingId = UUID.randomUUID();
+        UUID myListingId = UUID.randomUUID();
+
+        Sale boughtByMe = pendingSale(UUID.randomUUID(), otherListingId, userId, "111111");
+        Sale soldByMe = pendingSale(UUID.randomUUID(), myListingId, UUID.randomUUID(), "222222");
+
+        when(saleRepository.findByBuyerId(userId)).thenReturn(List.of(boughtByMe));
+        when(listingRepository.findBySellerId(userId))
+                .thenReturn(List.of(activeListing(myListingId, userId)));
+        when(saleRepository.findByListingIdIn(List.of(myListingId))).thenReturn(List.of(soldByMe));
+
+        mockMvc.perform(get("/api/sales/me")
+                        .with(jwt().jwt(j -> j.subject(userId.toString()))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(2));
     }
 
     private Listing activeListing(UUID id, UUID sellerId) {

@@ -10,6 +10,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -23,6 +24,8 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 import ar.solocuerdas.backend.config.SecurityConfig;
+import ar.solocuerdas.backend.reviews.Review;
+import ar.solocuerdas.backend.reviews.ReviewRepository;
 
 @WebMvcTest(UserController.class)
 @Import(SecurityConfig.class)
@@ -33,6 +36,9 @@ class UserControllerTest {
 
     @MockitoBean
     private ProfileRepository profileRepository;
+
+    @MockitoBean
+    private ReviewRepository reviewRepository;
 
     @Test
     void getMeReturnsProfileDataForAuthenticatedUser() throws Exception {
@@ -186,5 +192,28 @@ class UserControllerTest {
         mockMvc.perform(get("/api/users/{id}", targetId)
                         .with(jwt().jwt(j -> j.subject(requesterId.toString()))))
                 .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void listsTheReviewsOfAUser() throws Exception {
+        UUID targetId = UUID.randomUUID();
+        UUID requesterId = UUID.randomUUID();
+
+        Review review = new Review();
+        review.setId(UUID.randomUUID());
+        review.setSaleId(UUID.randomUUID());
+        review.setReviewerId(UUID.randomUUID());
+        review.setRevieweeId(targetId);
+        review.setRating((short) 5);
+        review.setComment("Excelente, tal cual la descripcion.");
+
+        when(reviewRepository.findByRevieweeId(targetId)).thenReturn(List.of(review));
+
+        mockMvc.perform(get("/api/users/{id}/reviews", targetId)
+                        .with(jwt().jwt(j -> j.subject(requesterId.toString()))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].revieweeId").value(targetId.toString()))
+                .andExpect(jsonPath("$[0].rating").value(5));
     }
 }
