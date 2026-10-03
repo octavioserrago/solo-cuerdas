@@ -61,7 +61,7 @@ public class Listing {
     @Column(name = "created_at")
     private Instant createdAt;
 
-    protected Listing() {
+    public Listing() {
         // JPA
     }
 

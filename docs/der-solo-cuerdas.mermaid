@@ -120,6 +120,7 @@ erDiagram
         numeric final_price
         enum currency "ARS | USD"
         enum status "pending_confirmation | completed | cancelled"
+        text confirmation_code "nullable: codigo que el vendedor le pasa al comprador"
         timestamptz created_at
         timestamptz completed_at
     }

@@ -86,11 +86,18 @@ ar.solocuerdas.backend
 │   ├── CreateListingRequest.java       — record de request de POST
 │   ├── UpdateListingRequest.java       — record de request de PATCH
 │   └── ListingQuotaExceededException.java — 409 cuando se llega al tope del plan
-└── plans/
-    ├── Plan.java                 — entidad JPA mínima de `plans` (solo id + max_active_listings)
-    ├── PlanRepository.java       — JpaRepository<Plan, Integer>
-    ├── Subscription.java         — entidad JPA mínima de `subscriptions`
-    └── SubscriptionRepository.java — JpaRepository<Subscription, UUID> + findByProfileIdAndStatus
+├── plans/
+│   ├── Plan.java                 — entidad JPA mínima de `plans` (solo id + max_active_listings)
+│   ├── PlanRepository.java       — JpaRepository<Plan, Integer>
+│   ├── Subscription.java         — entidad JPA mínima de `subscriptions`
+│   └── SubscriptionRepository.java — JpaRepository<Subscription, UUID> + findByProfileIdAndStatus
+└── sales/
+    ├── SaleController.java        — POST /, POST /{id}/confirm
+    ├── Sale.java                   — entidad JPA de `sales`
+    ├── SaleRepository.java         — JpaRepository<Sale, UUID>
+    ├── SaleResponse.java           — record de respuesta
+    ├── CreateSaleRequest.java      — record de request de POST
+    └── ConfirmSaleRequest.java     — record de request de POST /{id}/confirm
 ```
 
 Paquete base: `ar.solocuerdas.backend`. Un paquete por dominio de negocio
@@ -142,6 +149,8 @@ Flujo de una request autenticada:
 | PATCH | `/api/listings/{id}` | JWT requerido, dueño | Edita campos propios y/o cambia `status` entre `active`⇄`paused` (cualquier otro valor → `400`; no es dueño → `403`; reactivar en el tope del cupo → `409`, mismo chequeo que el `POST`). |
 | GET | `/api/public/listings/{id}` | **Sin auth** | Detalle público — solo si `status = 'active'` (el filtro va en la query, no en un `if` posterior); si no, `404` sin distinguir "no existe" de "no está activa". |
 | GET | `/api/public/listings` | **Sin auth** | Lista de publicaciones `active`. Sin filtros/paginación todavía (búsqueda queda para una próxima vuelta). |
+| POST | `/api/sales` | JWT requerido, dueño de la publicación | Crea una venta `pending_confirmation` para un comprador puntual. Genera un código de 6 dígitos que el vendedor le pasa al comprador en persona. Publicación no `active` → `400`; ya hay venta pendiente/completada para esa publicación → `409`. |
+| POST | `/api/sales/{id}/confirm` | JWT requerido, debe ser el comprador | El comprador escribe el código. Si coincide: la venta pasa a `completed` (y se borra el código), y la publicación pasa a `status = sold`. Código incorrecto → `400`; venta ya no está `pending_confirmation` → `400`; no sos el comprador → `403`. |
 
 Todos los campos de `listings` se consideraron públicos a propósito (incluido
 `serial_number`, decisión explícita) — por eso `ListingResponse` es un único
@@ -223,6 +232,10 @@ no tener que releer las ~420 líneas de SQL:
 
 **Ventas y reputación**
 - `sales`: máx. una `completed` y una `pending_confirmation` por publicación.
+  `confirmation_code` (agregado en `20261003020000_sales_confirmation_and_rating_fix.sql`):
+  el vendedor lo genera al crear la venta, el comprador lo escribe para
+  confirmarla — sin esto, cualquiera de las dos partes podría fabricar una
+  venta sin que la otra participe.
 - `reviews`: una por (`sale_id`, `reviewer_id`); `reviewer_id ≠ reviewee_id`.
 - `reports`: apunta a una publicación y/o a un perfil (al menos uno).
 
@@ -231,7 +244,12 @@ no tener que releer las ~420 líneas de SQL:
   suscribe al plan `free`.
 - `recalculate_rating()`: recalcula `rating_average`/`rating_count` del
   `reviewee` cada vez que cambian sus `reviews` (recálculo completo, no
-  incremental, para que nunca quede desincronizado).
+  incremental, para que nunca quede desincronizado). Redefinida en
+  `20261003020000_sales_confirmation_and_rating_fix.sql`: solo cuenta la
+  **primera** review de cada `reviewer` hacia un mismo `reviewee` — evita
+  que dos cuentas (o una misma persona con dos cuentas) se inflen la
+  reputación repitiendo operaciones entre sí. Las reviews siguientes del
+  mismo par se guardan, pero no suman al promedio/contador.
 - `is_conversation_participant(uuid)`: `security definer`; usada por las
   policies de RLS para chequear si `auth.uid()` es comprador o vendedor de
   una conversación.
@@ -257,41 +275,47 @@ todavía — un solo `application.yml` para todo.
 - Esqueleto Spring Boot 4.1.1 / Java 21, conectado a Supabase Postgres.
 - Seguridad: JWT de Supabase validado como Resource Server, stateless, con
   `JwtDecoder` explícito aceptando ES256.
-- `GET`/`PATCH /api/users/me` (completar/editar perfil propio), con
-  validación de formato (`400`) y manejo de `username` duplicado (`409`).
-- `GET /api/users/{id}` (perfil público de otro usuario, subconjunto de
-  campos), `404` si no existe.
-- Entidad JPA `Profile` + `ProfileRepository`.
-- `ApiExceptionHandler` (`@RestControllerAdvice`): `DataIntegrityViolationException`
-  → `409`, `NoSuchElementException` → `404`.
-- Esquema completo migrado (13 tablas, enums, triggers, RLS, buckets).
-- Probado de punta a punta contra el servidor real (no solo tests mockeados):
-  `GET`/`PATCH /me` confirmados por Postman contra Supabase de verdad.
+- `GET`/`PATCH /api/users/me` (completar/editar perfil propio) y
+  `GET /api/users/{id}` (perfil público, subconjunto de campos).
 - CRUD de `listings` (ronda 1 — core, sin media/búsqueda/categorías):
   `POST`/`GET /me`/`PATCH /{id}` (autenticado) y `GET`/`GET /{id}`
   (público, bajo `/api/public/listings`). Cupo por plan (`max_active_listings`)
   chequeado al crear y al reactivar una pausada. Autorización por dueño
-  (`403` si no sos el vendedor) — primer endpoint que lo necesita.
-- Entidades JPA: `Profile`, `Listing`, `Plan`/`Subscription` (estas dos
-  mínimas, de solo lectura — ver sección 6).
+  (`403` si no sos el vendedor) — primer endpoint que lo necesitó.
+- `sales` (ronda 1): `POST /api/sales` (el vendedor registra la venta,
+  genera un código de 6 dígitos) y `POST /api/sales/{id}/confirm` (el
+  comprador lo confirma; la publicación pasa a `sold`). Pensado contra
+  fraude de a una sola parte (no alcanza con que el vendedor la marque
+  solo); la colusión entre dos cuentas se ataca aparte, a nivel de
+  reputación (ver sección 7, `recalculate_rating`).
+- Entidades JPA: `Profile`, `Listing`, `Sale`, `Plan`/`Subscription` (estas
+  dos últimas mínimas, de solo lectura — ver sección 6).
 - `ApiExceptionHandler` (`@RestControllerAdvice`): `DataIntegrityViolationException`
   → `409`, `NoSuchElementException` → `404`, `ListingQuotaExceededException`
-  → `409`. `AccessDeniedException` (dueño) y status inválido
+  → `409`. `AccessDeniedException` (dueño) y status/código inválido
   (`ResponseStatusException`) se resuelven con el soporte nativo de Spring,
   sin entrada propia acá.
-- Esquema completo migrado (13 tablas, enums, triggers, RLS, buckets).
-- Probado de punta a punta contra el servidor real (no solo tests mockeados):
-  `GET`/`PATCH /me` confirmados por Postman contra Supabase de verdad.
-  `listings` todavía solo probado con tests automatizados (Postman pendiente).
-- Tests: 20 (1 de contexto + 19 de controllers, con TDD — `@WebMvcTest` +
+- Esquema completo migrado (13 tablas, enums, triggers, RLS, buckets) +
+  una migración de evolución (`confirmation_code` en `sales`, fix de
+  `recalculate_rating`).
+- Probado de punta a punta contra el servidor real (no solo tests
+  mockeados): `GET`/`PATCH /me` y todo `listings` confirmados por Postman
+  contra Supabase de verdad. `sales` todavía solo probado con tests
+  automatizados (Postman pendiente).
+- Tests: 28 (1 de contexto + 27 de controllers, con TDD — `@WebMvcTest` +
   repositorios mockeados, sin pegarle a la base real).
 
 **Pendiente (próximos pasos típicos, no priorizados)**
 - Sub-proyectos de `listings` que quedaron afuera a propósito: media
   (fotos/audio/video vía URLs firmadas de Storage), búsqueda/filtrado,
   endpoints de referencia para categorías/marcas.
-- CRUD de conversaciones/mensajes, ventas, reviews, reports (sin entidad
-  JPA todavía).
+- De `sales`: cancelar una venta a mano, listar mis ventas (como
+  comprador o vendedor).
+- CRUD de `reviews` (depende de `sales`, ya desbloqueado) y de
+  conversaciones/mensajes/reports (sin entidad JPA todavía).
+- Atar `sales`/`reviews` a que ambas partes tengan `identity_status =
+  verified` — refuerzo anti-colusión pensado para cuando exista el
+  módulo de verificación de identidad (CU0007/08).
 - Autorización por rol (`moderator`/`admin`) más allá de "dueño del recurso".
 - Test de integración real contra Postgres (Testcontainers) — hoy todo se
   prueba con el repositorio mockeado.
