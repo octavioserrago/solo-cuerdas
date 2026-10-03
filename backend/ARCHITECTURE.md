@@ -91,13 +91,19 @@ ar.solocuerdas.backend
 │   ├── PlanRepository.java       — JpaRepository<Plan, Integer>
 │   ├── Subscription.java         — entidad JPA mínima de `subscriptions`
 │   └── SubscriptionRepository.java — JpaRepository<Subscription, UUID> + findByProfileIdAndStatus
-└── sales/
-    ├── SaleController.java        — POST /, POST /{id}/confirm
-    ├── Sale.java                   — entidad JPA de `sales`
-    ├── SaleRepository.java         — JpaRepository<Sale, UUID>
-    ├── SaleResponse.java           — record de respuesta
-    ├── CreateSaleRequest.java      — record de request de POST
-    └── ConfirmSaleRequest.java     — record de request de POST /{id}/confirm
+├── sales/
+│   ├── SaleController.java        — POST /, POST /{id}/confirm
+│   ├── Sale.java                   — entidad JPA de `sales`
+│   ├── SaleRepository.java         — JpaRepository<Sale, UUID>
+│   ├── SaleResponse.java           — record de respuesta
+│   ├── CreateSaleRequest.java      — record de request de POST
+│   └── ConfirmSaleRequest.java     — record de request de POST /{id}/confirm
+└── reviews/
+    ├── ReviewController.java      — POST /
+    ├── Review.java                 — entidad JPA de `reviews` (rating: Short, es smallint)
+    ├── ReviewRepository.java       — JpaRepository<Review, UUID>
+    ├── ReviewResponse.java         — record de respuesta
+    └── CreateReviewRequest.java    — record de request de POST
 ```
 
 Paquete base: `ar.solocuerdas.backend`. Un paquete por dominio de negocio
@@ -151,6 +157,7 @@ Flujo de una request autenticada:
 | GET | `/api/public/listings` | **Sin auth** | Lista de publicaciones `active`. Sin filtros/paginación todavía (búsqueda queda para una próxima vuelta). |
 | POST | `/api/sales` | JWT requerido, dueño de la publicación | Crea una venta `pending_confirmation` para un comprador puntual. Genera un código de 6 dígitos que el vendedor le pasa al comprador en persona. Publicación no `active` → `400`; ya hay venta pendiente/completada para esa publicación → `409`. |
 | POST | `/api/sales/{id}/confirm` | JWT requerido, debe ser el comprador | El comprador escribe el código. Si coincide: la venta pasa a `completed` (y se borra el código), y la publicación pasa a `status = sold`. Código incorrecto → `400`; venta ya no está `pending_confirmation` → `400`; no sos el comprador → `403`. |
+| POST | `/api/reviews` | JWT requerido, parte de la venta | Califica a la otra parte de una venta `completed` (`saleId`, `rating`, `comment` opcional). El `revieweeId` lo calcula el backend: si sos el comprador, calificás al vendedor (vía `listings.seller_id`), y viceversa. Venta no `completed` → `400`; no participaste de esa venta → `403`; ya la calificaste → `409`. La reputación (`profiles.rating_average`/`rating_count`) se actualiza sola, vía el trigger de la base — no hay lógica de backend para eso. |
 
 Todos los campos de `listings` se consideraron públicos a propósito (incluido
 `serial_number`, decisión explícita) — por eso `ListingResponse` es un único
@@ -288,21 +295,26 @@ todavía — un solo `application.yml` para todo.
   fraude de a una sola parte (no alcanza con que el vendedor la marque
   solo); la colusión entre dos cuentas se ataca aparte, a nivel de
   reputación (ver sección 7, `recalculate_rating`).
-- Entidades JPA: `Profile`, `Listing`, `Sale`, `Plan`/`Subscription` (estas
-  dos últimas mínimas, de solo lectura — ver sección 6).
+- `reviews`: `POST /api/reviews` — califica a la otra parte de una venta
+  `completed`. El `revieweeId` se calcula solo (comprador↔vendedor, vía
+  `listings.seller_id`); venta no completada → `400`, no participaste →
+  `403`, ya calificaste esa venta → `409`. La reputación se recalcula
+  sola (trigger de la base).
+- Entidades JPA: `Profile`, `Listing`, `Sale`, `Review`, `Plan`/`Subscription`
+  (estas dos últimas mínimas, de solo lectura — ver sección 6).
 - `ApiExceptionHandler` (`@RestControllerAdvice`): `DataIntegrityViolationException`
   → `409`, `NoSuchElementException` → `404`, `ListingQuotaExceededException`
-  → `409`. `AccessDeniedException` (dueño) y status/código inválido
-  (`ResponseStatusException`) se resuelven con el soporte nativo de Spring,
-  sin entrada propia acá.
+  → `409`. `AccessDeniedException` (dueño/parte de una venta) y status/código
+  inválido (`ResponseStatusException`) se resuelven con el soporte nativo
+  de Spring, sin entrada propia acá.
 - Esquema completo migrado (13 tablas, enums, triggers, RLS, buckets) +
   una migración de evolución (`confirmation_code` en `sales`, fix de
   `recalculate_rating`).
 - Probado de punta a punta contra el servidor real (no solo tests
-  mockeados): `GET`/`PATCH /me` y todo `listings` confirmados por Postman
-  contra Supabase de verdad. `sales` todavía solo probado con tests
-  automatizados (Postman pendiente).
-- Tests: 28 (1 de contexto + 27 de controllers, con TDD — `@WebMvcTest` +
+  mockeados): `GET`/`PATCH /me`, todo `listings` y todo `sales`
+  confirmados por Postman contra Supabase de verdad. `reviews` todavía
+  solo probado con tests automatizados (Postman pendiente).
+- Tests: 33 (1 de contexto + 32 de controllers, con TDD — `@WebMvcTest` +
   repositorios mockeados, sin pegarle a la base real).
 
 **Pendiente (próximos pasos típicos, no priorizados)**
@@ -311,8 +323,11 @@ todavía — un solo `application.yml` para todo.
   endpoints de referencia para categorías/marcas.
 - De `sales`: cancelar una venta a mano, listar mis ventas (como
   comprador o vendedor).
-- CRUD de `reviews` (depende de `sales`, ya desbloqueado) y de
-  conversaciones/mensajes/reports (sin entidad JPA todavía).
+- De `reviews`: listar las reviews individuales de un usuario (hoy solo
+  se ve el promedio/contador en el perfil); validación de formato en
+  `CreateReviewRequest` (`rating` 1-5, `comment` ≤500 — hoy dependen de
+  los `check` de la base, igual que pasó al principio con `listings`).
+- CRUD de conversaciones/mensajes/reports (sin entidad JPA todavía).
 - Atar `sales`/`reviews` a que ambas partes tengan `identity_status =
   verified` — refuerzo anti-colusión pensado para cuando exista el
   módulo de verificación de identidad (CU0007/08).

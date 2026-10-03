@@ -38,7 +38,7 @@ public class Sale {
     @Column(name = "completed_at")
     private Instant completedAt;
 
-    protected Sale() {
+    public Sale() {
         // JPA
     }
 
