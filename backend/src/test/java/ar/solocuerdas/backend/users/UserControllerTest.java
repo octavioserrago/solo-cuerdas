@@ -139,4 +139,52 @@ class UserControllerTest {
                         .content("{\"username\": \"ya_existente\"}"))
                 .andExpect(status().isConflict());
     }
+
+    @Test
+    void getPublicProfileReturnsOnlyPublicFields() throws Exception {
+        UUID targetId = UUID.randomUUID();
+        UUID requesterId = UUID.randomUUID();
+
+        Profile target = new Profile();
+        target.setId(targetId);
+        target.setFirstName("Octavio");
+        target.setLastName("Serrago");
+        target.setUsername("octa");
+        target.setPhone("1122334455");
+        target.setProvince("Buenos Aires");
+        target.setCity("La Plata");
+        target.setRole("user");
+        target.setIdentityStatus("verified");
+        target.setRatingAverage(new BigDecimal("4.50"));
+        target.setRatingCount(3);
+        target.setCreatedAt(Instant.parse("2026-01-01T00:00:00Z"));
+
+        when(profileRepository.findById(targetId)).thenReturn(Optional.of(target));
+
+        mockMvc.perform(get("/api/users/{id}", targetId)
+                        .with(jwt().jwt(j -> j.subject(requesterId.toString()))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(targetId.toString()))
+                .andExpect(jsonPath("$.username").value("octa"))
+                .andExpect(jsonPath("$.firstName").value("Octavio"))
+                .andExpect(jsonPath("$.province").value("Buenos Aires"))
+                .andExpect(jsonPath("$.identityStatus").value("verified"))
+                .andExpect(jsonPath("$.ratingAverage").value(4.50))
+                .andExpect(jsonPath("$.phone").doesNotExist())
+                .andExpect(jsonPath("$.lastName").doesNotExist())
+                .andExpect(jsonPath("$.role").doesNotExist())
+                .andExpect(jsonPath("$.email").doesNotExist());
+    }
+
+    @Test
+    void getPublicProfileReturns404WhenProfileDoesNotExist() throws Exception {
+        UUID targetId = UUID.randomUUID();
+        UUID requesterId = UUID.randomUUID();
+
+        when(profileRepository.findById(targetId)).thenReturn(Optional.empty());
+
+        mockMvc.perform(get("/api/users/{id}", targetId)
+                        .with(jwt().jwt(j -> j.subject(requesterId.toString()))))
+                .andExpect(status().isNotFound());
+    }
 }
