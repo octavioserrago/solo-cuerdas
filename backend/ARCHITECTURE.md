@@ -80,10 +80,16 @@ ar.solocuerdas.backend
 ├── listings/
 │   ├── ListingController.java        — POST /, GET /me, PATCH /{id} (requieren JWT)
 │   ├── PublicListingController.java  — GET /, GET /{id} (sin auth, bajo /api/public/listings)
+│   ├── ListingMediaController.java    — POST /{listingId}/media, POST /{listingId}/media/{id}/confirm
 │   ├── Listing.java                   — entidad JPA de `listings`
+│   ├── ListingMedia.java               — entidad JPA de `listing_media`
 │   ├── ListingRepository.java         — JpaRepository<Listing, UUID> + queries derivadas
+│   ├── ListingMediaRepository.java     — JpaRepository<ListingMedia, UUID>
+│   ├── MediaStorageClient.java         — interfaz (abstrae Supabase Storage)
+│   ├── SupabaseMediaStorageClient.java — implementación real (RestClient + service role key)
 │   ├── ListingResponse.java           — record de respuesta (único, público = privado del dueño)
-│   ├── CreateListingRequest.java       — record de request de POST
+│   ├── MediaUploadResponse.java / MediaResponse.java
+│   ├── CreateListingRequest.java / CreateMediaRequest.java
 │   ├── UpdateListingRequest.java       — record de request de PATCH
 │   └── ListingQuotaExceededException.java — 409 cuando se llega al tope del plan
 ├── plans/
@@ -174,6 +180,8 @@ Flujo de una request autenticada:
 | PATCH | `/api/reports/{id}` | JWT requerido, **moderador o admin** | Resuelve una denuncia (`status`: `resolved`/`dismissed`), registrando quién la resolvió. No sos moderador/admin → `403` (primera vez que el backend chequea **rol**, no solo dueño del recurso). Denuncia ya no `open` → `400`; valor de `status` inválido → `400`. |
 | GET | `/api/public/categories` | **Sin auth** | Catálogo de categorías (seedeado, solo lectura). |
 | GET | `/api/public/brands` | **Sin auth** | Catálogo de marcas (seedeado, solo lectura). |
+| POST | `/api/listings/{listingId}/media` | JWT requerido, dueño | Reserva una subida: crea la fila en `listing_media` (`moderation_status = pending`) y devuelve una URL firmada de Supabase Storage para que el cliente suba el archivo directo (no pasa por el backend). |
+| POST | `/api/listings/{listingId}/media/{mediaId}/confirm` | JWT requerido, dueño | El cliente avisa que terminó de subir. Corre la revisión de moderación — **hoy un stub que siempre aprueba** (ver sección 7 y `docs/ARCHITECTURE.md` sección 5) — y pasa a `approved` (o `rejected` + borra el archivo de Storage, rama ya escrita aunque hoy nunca se dispare). |
 
 Todos los campos de `listings` se consideraron públicos a propósito (incluido
 `serial_number`, decisión explícita) — por eso `ListingResponse` es un único
@@ -245,8 +253,12 @@ no tener que releer las ~420 líneas de SQL:
   (`draft|active|paused|sold|deleted`). Índices parciales optimizados para
   `status = 'active'` (por categoría, marca, ubicación).
 - `listing_media`: fotos/audio/video, orden único por publicación,
-  `perceptual_hash` (detección de duplicados, solo fotos),
-  `is_verification_photo` (solo fotos).
+  `perceptual_hash` (detección de duplicados, solo fotos, sin calcular
+  todavía), `is_verification_photo` (solo fotos). `moderation_status`
+  (agregado en `20261003030000_listing_media_moderation.sql`):
+  `pending|approved|rejected`; solo lo `approved` debería mostrarse
+  (todavía no hay ningún endpoint que devuelva media embebida en una
+  publicación, así que hoy esto no se filtra en ningún lado — ver sección 9).
 
 **Comunicación**
 - `conversations`: una por (`listing_id`, `buyer_id`).
@@ -289,8 +301,18 @@ escritura para clientes: las subidas van a través de URLs firmadas que
 ## 8. Configuración (`application.yml` / `.env`)
 
 `application.yml` importa `.env` (no versionado) para: `DB_URL`, `DB_USER`,
-`DB_PASSWORD`, `SUPABASE_URL`. No hay profiles de Spring (`dev`/`prod`)
-todavía — un solo `application.yml` para todo.
+`DB_PASSWORD`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`. No hay profiles
+de Spring (`dev`/`prod`) todavía — un solo `application.yml` para todo.
+
+`SUPABASE_SERVICE_ROLE_KEY` (nuevo, para `listing_media`): a diferencia del
+resto de las variables, no se referencia desde `application.yml` — se lee
+directo con `@Value("${SUPABASE_SERVICE_ROLE_KEY}")` en
+`SupabaseMediaStorageClient`, porque el `.env` importado como property
+source deja cualquier variable disponible así, sin tener que declararla
+primero en el yml (mismo mecanismo con el que `${SUPABASE_URL}` ya se usaba
+dentro del yml). Es una clave con permisos de administrador sobre todo el
+proyecto de Supabase — nunca debe llegar a ningún cliente (Android/web),
+solo el backend la usa.
 
 ## 9. Implementado vs. pendiente
 
@@ -348,12 +370,26 @@ todavía — un solo `application.yml` para todo.
   (todos opcionales y combinables), vía una sola query con parámetros
   nulleables — sin Specifications ni Criteria API, mismo estilo que el
   resto de los repositorios del proyecto.
-- Tests: 44 (1 de contexto + 43 de controllers, con TDD — `@WebMvcTest` +
-  repositorios mockeados, sin pegarle a la base real).
+- Media de `listings` (ronda 1): `POST /{id}/media` (reserva, URL firmada
+  de Supabase Storage) + `POST /{id}/media/{mediaId}/confirm` (confirma,
+  corre moderación). Primera integración HTTP con un servicio externo
+  (`MediaStorageClient`/`SupabaseMediaStorageClient`, nueva credencial
+  `SUPABASE_SERVICE_ROLE_KEY`). Moderación con **stub que siempre aprueba**
+  — a propósito, es el diseño aceptado para la tesis; la regla real para
+  producción (cuarentena antes del bucket público) está documentada como
+  no negociable en `docs/ARCHITECTURE.md` secciones 2 y 5, no implementada.
+- Tests: 48 (1 de contexto + 47 de controllers, con TDD — `@WebMvcTest` +
+  repositorios y `MediaStorageClient` mockeados; la implementación real de
+  Storage no tiene test automatizado — mismo criterio que Postgres real,
+  se verificó a mano contra la API de Supabase antes de escribir el código,
+  y falta la verificación manual end-to-end por Postman).
 
 **Pendiente (próximos pasos típicos, no priorizados)**
-- De `listings`: media (fotos/audio/video vía URLs firmadas de Storage),
-  paginación y orden (destacadas/más nuevas primero) en la búsqueda.
+- De `listings`: que `ListingResponse` devuelva la media aprobada de la
+  publicación (hoy existe el endpoint de subida pero ninguna respuesta la
+  expone todavía); paginación y orden (destacadas/más nuevas primero) en
+  la búsqueda; compresión de video como capa intermedia (ver
+  `docs/ARCHITECTURE.md` sección 5).
 - De `sales`: cancelar una venta a mano, listar mis ventas (como
   comprador o vendedor).
 - De `reviews`: listar las reviews individuales de un usuario (hoy solo

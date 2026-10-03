@@ -79,6 +79,14 @@ se mide contra esto antes de implementarse:
    paso propio, antes de escribir código.** Evita que una idea se empiece a
    implementar a medio camino y quede una mezcla inconsistente de diseño
    viejo y nuevo.
+8. **Ningún archivo de media se aloja en un bucket público sin aprobación
+   previa — regla de producción (v1.0), no del MVP de tesis.** La subida
+   tiene que pasar primero por una zona intermedia/privada; recién se copia
+   al bucket público si una revisión automática la aprueba, y se borra sin
+   haber estado nunca expuesta si la rechaza. El diseño actual del MVP
+   (subida directa al bucket público + un campo que solo controla si la API
+   lo muestra) es un atajo aceptado explícitamente para la tesis — no el
+   diseño final. Ver sección 5 para el detalle y la decisión.
 
 ## 3. Cómo evaluar si algo nuevo es "escalable" bajo estos principios
 
@@ -131,3 +139,25 @@ perderlas de vista.
   `backend/ARCHITECTURE.md` sección 9). La precondición para retomar esta
   idea ya se cumplió; si se retoma, sigue siendo una extensión propia del
   DER, como se definió arriba.
+
+- **Moderación de media: cuarentena antes del bucket público** (evaluado
+  2026-10-03, al diseñar la subida de fotos/audio/video de `listings`).
+  El diseño del MVP de tesis sube el archivo **directo** al bucket público
+  (`listing-media`) y usa una columna `moderation_status` que solo controla
+  si la API lo *muestra* — el archivo ya está alojado ahí, aunque invisible,
+  desde el momento en que se sube. Para producción real (v1.0) esto no
+  alcanza: la regla (principio 8 de la sección 2) es que nada llegue al
+  bucket público sin aprobación previa.
+  **Lo que haría falta para 1.0:** una zona intermedia (un bucket privado de
+  cuarentena, o un prefijo no público dentro del mismo bucket) donde el
+  archivo aterriza primero; un paso de revisión automática real (hoy es un
+  stub que siempre aprueba — candidatos: AWS Rekognition, Google Cloud
+  Vision SafeSearch, Sightengine, u otro servicio de moderación de
+  contenido); recién al aprobar, copiar/mover el archivo al bucket público;
+  al rechazar, borrarlo sin que haya estado nunca expuesto. También quedó
+  anotada una alternativa para no depender de que el cliente avise "ya
+  subí": un trigger sobre la tabla interna `storage.objects` de Supabase
+  (mismo mecanismo que `handle_new_user`), que detectaría la subida sola.
+  **Decisión:** no incorporar todavía. El atajo del MVP (subida directa +
+  flag de visibilidad) queda explícitamente aceptado solo para la tesis.
+  Antes de un lanzamiento real, este es un bloqueante, no un "nice to have".
