@@ -13,4 +13,6 @@ public interface SaleRepository extends JpaRepository<Sale, UUID> {
     // usa junto con listingRepository.findBySellerId para armar "mis ventas
     // como vendedor".
     List<Sale> findByListingIdIn(List<UUID> listingIds);
+
+    long countByBuyerIdAndStatus(UUID buyerId, String status);
 }

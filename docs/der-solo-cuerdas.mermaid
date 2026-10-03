@@ -16,6 +16,10 @@ erDiagram
     PROFILES ||--o{ REVIEWS : receives
     PROFILES ||--o{ REPORTS : files
     LISTINGS |o--o{ REPORTS : "is reported in"
+    CONVERSATIONS |o--o{ REPORTS : "is evidence for"
+    PROFILES ||--o{ BLOCKED_BUYERS : "blocks as seller"
+    PROFILES ||--o{ BLOCKED_BUYERS : "is blocked as buyer"
+    REPORTS ||--o| BLOCKED_BUYERS : triggers
 
     PROFILES {
         uuid id PK "= auth.users.id (Supabase)"
@@ -104,6 +108,8 @@ erDiagram
         uuid id PK
         uuid listing_id FK
         uuid buyer_id FK
+        enum status "pending | accepted | rejected"
+        enum contact_reason "quiero_comprarlo | consulta"
         timestamptz created_at
     }
     MESSAGES {
@@ -139,8 +145,16 @@ erDiagram
         uuid reporter_id FK
         uuid listing_id FK "nullable"
         uuid reported_profile_id FK "nullable"
+        uuid conversation_id FK "nullable: evidencia si nace de un mensaje"
         text reason
         enum status "open | resolved | dismissed"
         uuid resolved_by FK
+        timestamptz created_at
+    }
+    BLOCKED_BUYERS {
+        uuid id PK
+        uuid seller_id FK
+        uuid buyer_id FK
+        uuid report_id FK "que denuncia disparo el bloqueo"
         timestamptz created_at
     }

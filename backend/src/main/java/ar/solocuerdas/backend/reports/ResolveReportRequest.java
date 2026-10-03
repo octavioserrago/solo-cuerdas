@@ -1,4 +1,4 @@
 package ar.solocuerdas.backend.reports;
 
-public record ResolveReportRequest(String status) {
+public record ResolveReportRequest(String status, Boolean liftBlock) {
 }

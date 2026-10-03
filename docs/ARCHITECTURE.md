@@ -139,6 +139,16 @@ perderlas de vista.
   `backend/ARCHITECTURE.md` sección 9). La precondición para retomar esta
   idea ya se cumplió; si se retoma, sigue siendo una extensión propia del
   DER, como se definió arriba.
+  **Actualización (2026-10-03, diseño de `conversations`):** se separó la
+  idea en dos partes. La mecánica de **proponer y acordar un punto de
+  encuentro** dentro de una conversación aceptada (sin lugares verificados,
+  sin mapa de venues) **sí entra en el MVP de tesis** — es el sub-proyecto 4
+  de `conversations` (ver `backend/ARCHITECTURE.md` sección 9). Lo que sigue
+  sin incorporar es justamente la parte que motivó esta entrada original: el
+  **convenio con casas de música y estaciones de servicio** como lugar
+  verificado/seguro — eso sigue siendo requisito de producción (v1.0), no
+  de tesis, por las mismas razones de arriba (entidades nuevas, partnership
+  no validada).
 
 - **Moderación de media: cuarentena antes del bucket público** (evaluado
   2026-10-03, al diseñar la subida de fotos/audio/video de `listings`).
@@ -161,3 +171,17 @@ perderlas de vista.
   **Decisión:** no incorporar todavía. El atajo del MVP (subida directa +
   flag de visibilidad) queda explícitamente aceptado solo para la tesis.
   Antes de un lanzamiento real, este es un bloqueante, no un "nice to have".
+
+- **Seña/depósito para reservar un instrumento** (evaluado 2026-10-03, al
+  diseñar la solicitud de contacto de `conversations`). Para frenar spam sin
+  que el comprador deba esperar a que el vendedor acepte, se pensó que el
+  comprador pague una seña a Solo Cuerdas para "reservar" la publicación
+  mientras negocia. Se descartó en el momento: introduce pagos dentro de la
+  plataforma, algo explícitamente fuera del MVP (sección 4) y que además
+  rompe la ventaja competitiva de "sin comisión". El spam se ataca en
+  cambio con fricción no monetaria: el gate de solicitud de contacto del
+  vendedor (motivo fijo, perfil visible, reporte→bloqueo automático — ver
+  `backend/ARCHITECTURE.md` sección 9, `conversations` sub-proyecto 1).
+  **Decisión:** no incorporar. Si en el futuro se evalúa algún tipo de pago
+  dentro de la plataforma, es una decisión de modelo de negocio aparte, no
+  un parche al módulo de mensajería.

@@ -112,11 +112,20 @@ ar.solocuerdas.backend
 │   └── CreateReviewRequest.java    — record de request de POST
 ├── reports/
 │   ├── ReportController.java       — POST /, PATCH /{id} (resolver)
-│   ├── Report.java                  — entidad JPA de `reports`
+│   ├── Report.java                  — entidad JPA de `reports` (+ conversation_id)
 │   ├── ReportRepository.java        — JpaRepository<Report, UUID>
 │   ├── ReportResponse.java          — record de respuesta
-│   ├── CreateReportRequest.java     — record de request de POST
-│   └── ResolveReportRequest.java    — record de request de PATCH /{id}
+│   ├── CreateReportRequest.java     — record de request de POST (+ conversationId)
+│   └── ResolveReportRequest.java    — record de request de PATCH /{id} (+ liftBlock)
+├── conversations/
+│   ├── ConversationController.java    — POST /, GET /me, PATCH /{id} (aceptar/rechazar)
+│   ├── Conversation.java               — entidad JPA de `conversations` (+ status, contact_reason)
+│   ├── ConversationRepository.java     — JpaRepository<Conversation, UUID> + queries derivadas
+│   ├── BlockedBuyer.java               — entidad JPA de `blocked_buyers`
+│   ├── BlockedBuyerRepository.java     — JpaRepository<BlockedBuyer, UUID>
+│   ├── ConversationResponse.java / BuyerSummary.java — records de respuesta
+│   ├── CreateConversationRequest.java  — record de request de POST
+│   └── ResolveConversationRequest.java — record de request de PATCH /{id}
 └── catalog/
     ├── CatalogController.java      — GET /api/public/categories, GET /api/public/brands
     ├── Category.java / Brand.java   — entidades JPA de solo lectura
@@ -188,12 +197,15 @@ cualquier estado, para que sepa qué sigue `pending`/`rejected`.
 | GET | `/api/users/{id}/reviews` | JWT requerido | Las reviews que recibió ese usuario (individuales, con comentario — el perfil ya mostraba el promedio/contador agregado). |
 | GET | `/api/reports` | JWT requerido, **moderador o admin** | Lista las denuncias `open` (la cola de moderación). Mismo chequeo de rol que `PATCH /api/reports/{id}` — `403` si no sos moderador/admin. |
 | POST | `/api/reviews` | JWT requerido, parte de la venta | Califica a la otra parte de una venta `completed` (`saleId`, `rating`, `comment` opcional). El `revieweeId` lo calcula el backend: si sos el comprador, calificás al vendedor (vía `listings.seller_id`), y viceversa. Venta no `completed` → `400`; no participaste de esa venta → `403`; ya la calificaste → `409`. La reputación (`profiles.rating_average`/`rating_count`) se actualiza sola, vía el trigger de la base — no hay lógica de backend para eso. |
-| POST | `/api/reports` | JWT requerido | Denuncia una publicación y/o un perfil (`listingId`/`reportedProfileId`, al menos uno; `reason`). Siempre arranca en `open`. Ningún objetivo indicado → `400`. |
-| PATCH | `/api/reports/{id}` | JWT requerido, **moderador o admin** | Resuelve una denuncia (`status`: `resolved`/`dismissed`), registrando quién la resolvió. No sos moderador/admin → `403` (primera vez que el backend chequea **rol**, no solo dueño del recurso). Denuncia ya no `open` → `400`; valor de `status` inválido → `400`. |
+| POST | `/api/reports` | JWT requerido | Denuncia una publicación y/o un perfil (`listingId`/`reportedProfileId`, al menos uno; `reason`; `conversationId` opcional). Siempre arranca en `open`. Ningún objetivo indicado → `400`. Si viene `conversationId` + `reportedProfileId` **y** quien denuncia es justo el vendedor de esa conversación: además crea un bloqueo automático (`blocked_buyers`) para ese par vendedor-comprador y cierra (`rejected`) cualquier otra conversación `pending`/`accepted` que ese comprador tenga con el mismo vendedor en otras publicaciones. No se dispara para denuncias sin conversación (ej. denunciar una publicación) ni si quien denuncia no es el vendedor. |
+| PATCH | `/api/reports/{id}` | JWT requerido, **moderador o admin** | Resuelve una denuncia (`status`: `resolved`/`dismissed`), registrando quién la resolvió. No sos moderador/admin → `403` (primera vez que el backend chequea **rol**, no solo dueño del recurso). Denuncia ya no `open` → `400`; valor de `status` inválido → `400`. `liftBlock: true` opcional: además de resolver, borra el bloqueo que esa denuncia haya disparado (si la denuncia resultó injusta). |
 | GET | `/api/public/categories` | **Sin auth** | Catálogo de categorías (seedeado, solo lectura). |
 | GET | `/api/public/brands` | **Sin auth** | Catálogo de marcas (seedeado, solo lectura). |
 | POST | `/api/listings/{listingId}/media` | JWT requerido, dueño | Reserva una subida: crea la fila en `listing_media` (`moderation_status = pending`) y devuelve una URL firmada de Supabase Storage para que el cliente suba el archivo directo (no pasa por el backend). |
 | POST | `/api/listings/{listingId}/media/{mediaId}/confirm` | JWT requerido, dueño | El cliente avisa que terminó de subir. Corre la revisión de moderación — **hoy un stub que siempre aprueba** (ver sección 7 y `docs/ARCHITECTURE.md` sección 5) — y pasa a `approved` (o `rejected` + borra el archivo de Storage, rama ya escrita aunque hoy nunca se dispare). `mediaId` que no pertenece a `listingId` → `404` (ver nota de seguridad abajo); ya no está `pending` → `400`. |
+| POST | `/api/conversations` | JWT requerido | El comprador pide contactar al vendedor de una publicación (`listingId`, `contactReason`: `quiero_comprarlo`\|`consulta` — motivo fijo, no texto libre). Arranca en `pending`. Vendedor bloqueado → `403`; querer escribirse a uno mismo → `400`; ya hay una solicitud `pending`/`accepted` para ese par → `409`; si la única existente estaba `rejected`, se reabre a `pending` con el nuevo motivo en vez de duplicar fila (único por `listing_id`+`buyer_id`). |
+| GET | `/api/conversations/me` | JWT requerido | Las solicitudes propias, como comprador **o** vendedor (mismo patrón que `sales/me`). Cuando el que pide es el vendedor, cada una trae `buyer: BuyerSummary` embebido (ubicación, rating, `identityStatus`, compras completadas) para decidir si aceptar; cuando el que pide es el comprador, `buyer` viene `null` (ya tiene el perfil del vendedor vía el listing). |
+| PATCH | `/api/conversations/{id}` | JWT requerido, dueño de la publicación | Acepta o rechaza una solicitud `pending` (`status`: `accepted`\|`rejected`). No sos el vendedor → `403`; ya no está `pending` → `400`; valor fuera de `accepted`/`rejected` → `400`. `accepted` habilita la mensajería (todavía no implementada — ver pendientes). |
 
 Todos los campos de `listings` se consideraron públicos a propósito (incluido
 `serial_number`, decisión explícita) — por eso `ListingResponse` es un único
@@ -406,7 +418,21 @@ solo el backend la usa.
   extraído a un helper compartido `requireModerator`).
 - `ListingResponse` ya incluye `media` (ver sección 5) — la vista del dueño
   trae toda, la pública solo `approved`.
-- Tests: 60 (1 de contexto + 59 de controllers, con TDD — `@WebMvcTest` +
+- `conversations` — sub-proyecto 1, **solicitud de contacto** (el módulo
+  completo se decidió partir en 4 sub-proyectos independientes; este es el
+  primero, los otros tres siguen pendientes, ver abajo): `POST
+  /api/conversations` (pide contactar, motivo fijo no texto libre),
+  `GET /api/conversations/me` (con `BuyerSummary` embebido solo para el
+  vendedor), `PATCH /api/conversations/{id}` (aceptar/rechazar). Diseñado
+  como un gate del **vendedor**, no del sistema ni de un moderador — el
+  comprador necesita que el vendedor acepte antes de poder escribirle
+  libremente (eso todavía no existe, es el sub-proyecto 2). Denunciar desde
+  una conversación (`reports` + `conversationId`) bloquea automáticamente a
+  ese comprador **para ese vendedor** (no global) y cierra cualquier otra
+  conversación activa que tuvieran — un moderador puede deshacer el bloqueo
+  al resolver la denuncia (`liftBlock: true`). Sin bloqueo, una solicitud
+  rechazada se puede reabrir (no queda cerrada para siempre).
+- Tests: 74 (1 de contexto + 73 de controllers, con TDD — `@WebMvcTest` +
   repositorios y `MediaStorageClient` mockeados; la implementación real de
   Storage no tiene test automatizado — mismo criterio que Postgres real,
   se verificó a mano contra la API de Supabase antes de escribir el código,
@@ -420,8 +446,27 @@ solo el backend la usa.
 - De `reviews`: validación de formato en `CreateReviewRequest` (`rating`
   1-5, `comment` ≤500 — hoy dependen de los `check` de la base, igual que
   pasó al principio con `listings`).
-- Módulos nuevos: conversaciones/mensajes (con su particularidad de
-  Realtime+RLS), verificación de identidad (`identity_verifications`).
+- `conversations`, sub-proyectos 2 a 4 (diseño ya conversado y acordado,
+  no implementados):
+  2. **Mensajería con reglas**: enviar/leer mensajes dentro de una
+     conversación `accepted`. Límite de caracteres, de a un mensaje por
+     turno (el otro tiene que responder antes de que puedas mandar otro),
+     filtro de palabras prohibidas (sustancias, amenazas, etc.). El envío
+     pasa por el backend (no el cliente directo a Supabase) — es la única
+     forma de aplicar estas reglas; Realtime queda para que el cliente se
+     entere de mensajes nuevos, no para escribirlos.
+  3. **Retención de datos**: borrar conversaciones que no llegaron a la
+     venta en X tiempo, o cuyo instrumento ya se vendió — excepto la
+     conversación entre comprador y vendedor que concretó la venta, que no
+     se borra nunca.
+  4. **Punto de encuentro seguro**: el vendedor ofrece un lugar de
+     encuentro dentro de la conversación aceptada, lo negocian entre las
+     dos partes (no hay mapa de "lugares verificados" para el MVP de
+     tesis). El convenio con casas de música/estaciones de servicio como
+     lugar seguro queda como **requisito de producción**, no de tesis
+     (mismo tratamiento que la cuarentena de media).
+- Módulo nuevo sin empezar: verificación de identidad
+  (`identity_verifications`) — deliberadamente al final.
 - Atar `sales`/`reviews` a que ambas partes tengan `identity_status =
   verified` — refuerzo anti-colusión pensado para cuando exista el
   módulo de verificación de identidad.

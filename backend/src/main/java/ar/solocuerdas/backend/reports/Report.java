@@ -24,6 +24,9 @@ public class Report {
     @Column(name = "reported_profile_id")
     private UUID reportedProfileId;
 
+    @Column(name = "conversation_id")
+    private UUID conversationId;
+
     private String reason;
 
     private String status;
@@ -68,6 +71,14 @@ public class Report {
 
     public void setReportedProfileId(UUID reportedProfileId) {
         this.reportedProfileId = reportedProfileId;
+    }
+
+    public UUID getConversationId() {
+        return conversationId;
+    }
+
+    public void setConversationId(UUID conversationId) {
+        this.conversationId = conversationId;
     }
 
     public String getReason() {
