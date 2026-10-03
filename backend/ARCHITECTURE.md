@@ -125,7 +125,12 @@ ar.solocuerdas.backend
 │   ├── BlockedBuyerRepository.java     — JpaRepository<BlockedBuyer, UUID>
 │   ├── ConversationResponse.java / BuyerSummary.java — records de respuesta
 │   ├── CreateConversationRequest.java  — record de request de POST
-│   └── ResolveConversationRequest.java — record de request de PATCH /{id}
+│   ├── ResolveConversationRequest.java — record de request de PATCH /{id}
+│   ├── MessageController.java          — POST /api/conversations/{id}/messages
+│   ├── Message.java                    — entidad JPA de `messages`
+│   ├── MessageRepository.java          — JpaRepository<Message, UUID>
+│   ├── MessageResponse.java / SendMessageRequest.java — records
+│   └── BannedWordsFilter.java          — lista fija de palabras prohibidas (package-private)
 └── catalog/
     ├── CatalogController.java      — GET /api/public/categories, GET /api/public/brands
     ├── Category.java / Brand.java   — entidades JPA de solo lectura
@@ -205,7 +210,8 @@ cualquier estado, para que sepa qué sigue `pending`/`rejected`.
 | POST | `/api/listings/{listingId}/media/{mediaId}/confirm` | JWT requerido, dueño | El cliente avisa que terminó de subir. Corre la revisión de moderación — **hoy un stub que siempre aprueba** (ver sección 7 y `docs/ARCHITECTURE.md` sección 5) — y pasa a `approved` (o `rejected` + borra el archivo de Storage, rama ya escrita aunque hoy nunca se dispare). `mediaId` que no pertenece a `listingId` → `404` (ver nota de seguridad abajo); ya no está `pending` → `400`. |
 | POST | `/api/conversations` | JWT requerido | El comprador pide contactar al vendedor de una publicación (`listingId`, `contactReason`: `quiero_comprarlo`\|`consulta` — motivo fijo, no texto libre). Arranca en `pending`. Vendedor bloqueado → `403`; querer escribirse a uno mismo → `400`; ya hay una solicitud `pending`/`accepted` para ese par → `409`; si la única existente estaba `rejected`, se reabre a `pending` con el nuevo motivo en vez de duplicar fila (único por `listing_id`+`buyer_id`). |
 | GET | `/api/conversations/me` | JWT requerido | Las solicitudes propias, como comprador **o** vendedor (mismo patrón que `sales/me`). Cuando el que pide es el vendedor, cada una trae `buyer: BuyerSummary` embebido (ubicación, rating, `identityStatus`, compras completadas) para decidir si aceptar; cuando el que pide es el comprador, `buyer` viene `null` (ya tiene el perfil del vendedor vía el listing). |
-| PATCH | `/api/conversations/{id}` | JWT requerido, dueño de la publicación | Acepta o rechaza una solicitud `pending` (`status`: `accepted`\|`rejected`). No sos el vendedor → `403`; ya no está `pending` → `400`; valor fuera de `accepted`/`rejected` → `400`. `accepted` habilita la mensajería (todavía no implementada — ver pendientes). |
+| PATCH | `/api/conversations/{id}` | JWT requerido, dueño de la publicación | Acepta o rechaza una solicitud `pending` (`status`: `accepted`\|`rejected`). No sos el vendedor → `403`; ya no está `pending` → `400`; valor fuera de `accepted`/`rejected` → `400`. `accepted` habilita la mensajería. |
+| POST | `/api/conversations/{id}/messages` | JWT requerido, parte de la conversación | Manda un mensaje en una conversación `accepted`. No sos comprador ni vendedor → `403`; conversación no `accepted` → `400`; mensaje vacío o >300 caracteres → `400`; contiene una palabra de la lista prohibida (match por palabra completa, no substring — ver `BannedWordsFilter`) → `400`; el último mensaje lo mandaste vos y el otro todavía no respondió → `409` (de a un mensaje por turno). El envío pasa siempre por acá — el cliente nunca escribe directo a `messages` via Supabase (no hay policy de RLS para `insert`), solo lee por Realtime. |
 
 Todos los campos de `listings` se consideraron públicos a propósito (incluido
 `serial_number`, decisión explícita) — por eso `ListingResponse` es un único
@@ -384,9 +390,10 @@ solo el backend la usa.
   `recalculate_rating`).
 - Probado de punta a punta contra el servidor real (no solo tests
   mockeados): `GET`/`PATCH /me`, todo `listings`, todo `sales` y todo
-  `reviews` confirmados por Postman contra Supabase de verdad. `reports`,
-  `catalog` y la búsqueda filtrada todavía solo probados con tests
-  automatizados (Postman pendiente).
+  `reviews` confirmados por Postman contra Supabase de verdad. Todo lo que
+  falta probar así (no solo con tests automatizados) está consolidado en
+  una sola lista al final de esta sección ("Pendiente de probar a mano —
+  Postman"), para no perder el rastro entre sesiones.
 - `catalog`: `GET /api/public/categories` y `GET /api/public/brands` —
   sin auth, sin lógica, catálogos seedeados de solo lectura.
 - Búsqueda/filtrado de `listings`: `GET /api/public/listings` acepta
@@ -432,7 +439,23 @@ solo el backend la usa.
   conversación activa que tuvieran — un moderador puede deshacer el bloqueo
   al resolver la denuncia (`liftBlock: true`). Sin bloqueo, una solicitud
   rechazada se puede reabrir (no queda cerrada para siempre).
-- Tests: 74 (1 de contexto + 73 de controllers, con TDD — `@WebMvcTest` +
+- `conversations` — sub-proyecto 2, **mensajería con reglas**: `POST
+  /api/conversations/{id}/messages`, solo dentro de una conversación
+  `accepted`. Tres reglas automáticas, sin intervención humana (mismo
+  criterio que la moderación de media): límite de 300 caracteres (fricción
+  anti-spam, no una ficha técnica — mismo orden que el límite de un
+  comentario de review); de a un mensaje por turno (si el último mensaje de
+  la conversación lo mandaste vos, `409` hasta que el otro responda); lista
+  fija de palabras prohibidas (`BannedWordsFilter`, package-private, sin UI
+  de administración todavía) con **match por palabra completa, no
+  substring** (para que "armario" no dispare por contener "arma") y sin
+  distinguir acentos (se le sacan al contenido antes de comparar). El envío
+  pasa siempre por el backend — es la única forma de aplicar estas reglas;
+  no hay policy de RLS que permita `insert` directo del cliente a
+  `messages`, así que Realtime queda exclusivamente para que el cliente se
+  entere de mensajes nuevos, nunca para escribirlos (no es una excepción al
+  principio #1 de `docs/ARCHITECTURE.md`, lo hace explícito).
+- Tests: 84 (1 de contexto + 83 de controllers, con TDD — `@WebMvcTest` +
   repositorios y `MediaStorageClient` mockeados; la implementación real de
   Storage no tiene test automatizado — mismo criterio que Postgres real,
   se verificó a mano contra la API de Supabase antes de escribir el código,
@@ -446,15 +469,9 @@ solo el backend la usa.
 - De `reviews`: validación de formato en `CreateReviewRequest` (`rating`
   1-5, `comment` ≤500 — hoy dependen de los `check` de la base, igual que
   pasó al principio con `listings`).
-- `conversations`, sub-proyectos 2 a 4 (diseño ya conversado y acordado,
-  no implementados):
-  2. **Mensajería con reglas**: enviar/leer mensajes dentro de una
-     conversación `accepted`. Límite de caracteres, de a un mensaje por
-     turno (el otro tiene que responder antes de que puedas mandar otro),
-     filtro de palabras prohibidas (sustancias, amenazas, etc.). El envío
-     pasa por el backend (no el cliente directo a Supabase) — es la única
-     forma de aplicar estas reglas; Realtime queda para que el cliente se
-     entere de mensajes nuevos, no para escribirlos.
+- `conversations`, sub-proyectos 3 y 4 (diseño ya conversado y acordado,
+  no implementados; sub-proyecto 2 — mensajería con reglas — ya está
+  implementado, ver arriba):
   3. **Retención de datos**: borrar conversaciones que no llegaron a la
      venta en X tiempo, o cuyo instrumento ya se vendió — excepto la
      conversación entre comprador y vendedor que concretó la venta, que no
@@ -476,3 +493,39 @@ solo el backend la usa.
   a propósito (`null` y "no enviado" se tratan igual).
 - `status = 'deleted'` (baja definitiva) no está cubierto en `listings` —
   solo `active`⇄`paused`.
+
+**Pendiente de probar a mano (Postman, contra Supabase real) — lista
+consolidada.** Lo cubierto por tests automatizados (mockeados) no prueba
+que la integración real funcione; esta es la lista de lo que falta
+confirmar así, para no perder el rastro entre sesiones. Se tacha/saca de
+acá a medida que se prueba (no se deja constancia de lo ya hecho, ver
+arriba "Probado de punta a punta" para lo que ya está confirmado).
+
+- `reports`: `POST /api/reports` (publicación, perfil, y desde una
+  conversación con bloqueo automático), `PATCH /api/reports/{id}`
+  (resolver y `liftBlock`), `GET /api/reports`.
+- `catalog`: `GET /api/public/categories`, `GET /api/public/brands`.
+- Búsqueda filtrada de `listings`: `GET /api/public/listings` con cada
+  combinación de filtros (`categoryId`, `brandId`, `province`, `city`,
+  `minPrice`, `maxPrice`).
+- Media de `listings`: `POST /{id}/media` + `POST /{id}/media/{mediaId}/confirm`
+  (pospuesto a propósito, se prueba junto con el frontend — ver sección 9
+  arriba).
+- `conversations`, sub-proyecto 1: `POST /api/conversations` (crear,
+  reabrir una rechazada, bloqueado, duplicada), `GET /api/conversations/me`
+  (como comprador y como vendedor, verificar que el `BuyerSummary` solo
+  aparece para el vendedor), `PATCH /api/conversations/{id}` (aceptar,
+  rechazar). Importante probar también el efecto cruzado: denunciar desde
+  una conversación y confirmar en la base que `blocked_buyers` se creó y
+  que las demás conversaciones de ese comprador con el mismo vendedor
+  pasaron a `rejected`.
+- `conversations`, sub-proyecto 2 (mensajería): `POST
+  /api/conversations/{id}/messages` — mandar primer mensaje (comprador y
+  vendedor), turno alternado, intentar mandar dos seguidos (`409`), límite
+  de caracteres, y sobre todo **probar la lista de palabras prohibidas con
+  casos reales del rubro** (nombres de instrumentos/marcas/materiales) para
+  detectar falsos positivos que los tests automatizados no pueden anticipar
+  (ahí mismo se ve si hace falta sacar o agregar términos a
+  `BannedWordsFilter`). Confirmar también contra Supabase real que el
+  mensaje insertado por el backend le llega al otro participante por
+  Realtime.
